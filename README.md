@@ -36,41 +36,6 @@ Supports CLI agent integration including OpenClaw, nanobot, Cursor, and more.
 
 ---
 
-## 🚀 44x Lighter Than Claude Code
-
-<table>
-<tr><th></th><th>Claude Code</th><th>OpenHarness</th></tr>
-<tr><td><strong>Lines of Code</strong></td><td>512,664</td><td><strong>11,733</strong> (44x lighter)</td></tr>
-<tr><td><strong>Files</strong></td><td>1,884</td><td><strong>163</strong></td></tr>
-<tr><td><strong>Language</strong></td><td>TypeScript</td><td>Python</td></tr>
-<tr><td><strong>Tools</strong></td><td>~44</td><td>43 (98%)</td></tr>
-<tr><td><strong>Commands</strong></td><td>~88</td><td>54 (61%)</td></tr>
-<tr><td><strong>Skills Compatible</strong></td><td>✅</td><td>✅ anthropics/skills</td></tr>
-<tr><td><strong>Plugin Compatible</strong></td><td>✅</td><td>✅ claude-code/plugins</td></tr>
-<tr><td><strong>Tests</strong></td><td>—</td><td>114 unit + 6 E2E suites</td></tr>
-</table>
-
-Leverages Python's power with pure focus on Harness architecture—stripped of enterprise overhead like telemetry, OAuth complexity, and hundreds of React components.
-
----
-
-## 🤔 What is an Agent Harness?
-
-An **Agent Harness** is the complete infrastructure that wraps around an LLM to make it a functional agent. The model provides intelligence; the harness provides **hands, eyes, memory, and safety boundaries**.
-
-<p align="center">
-  <img src="assets/harness-equation.png" alt="Harness = Tools + Knowledge + Observation + Action + Permissions" width="700">
-</p>
-
-OpenHarness is an open-source Python implementation designed for **researchers, builders, and the community**:
-
-- **Understand** how production AI agents work under the hood
-- **Experiment** with cutting-edge tools, skills, and agent coordination patterns
-- **Extend** the harness with custom plugins, providers, and domain knowledge
-- **Build** specialized agents on top of proven architecture
-
----
-
 ## ✨ OpenHarness's Key Harness Features
 
 <table align="center" width="100%">
@@ -157,6 +122,41 @@ OpenHarness is an open-source Python implementation designed for **researchers, 
 </td>
 </tr>
 </table>
+
+---
+
+## 🚀 44x Lighter Than Claude Code
+
+<table>
+<tr><th></th><th>Claude Code</th><th>OpenHarness</th></tr>
+<tr><td><strong>Lines of Code</strong></td><td>512,664</td><td><strong>11,733</strong> (44x lighter)</td></tr>
+<tr><td><strong>Files</strong></td><td>1,884</td><td><strong>163</strong></td></tr>
+<tr><td><strong>Language</strong></td><td>TypeScript</td><td>Python</td></tr>
+<tr><td><strong>Tools</strong></td><td>~44</td><td>43 (98%)</td></tr>
+<tr><td><strong>Commands</strong></td><td>~88</td><td>54 (61%)</td></tr>
+<tr><td><strong>Skills Compatible</strong></td><td>✅</td><td>✅ anthropics/skills</td></tr>
+<tr><td><strong>Plugin Compatible</strong></td><td>✅</td><td>✅ claude-code/plugins</td></tr>
+<tr><td><strong>Tests</strong></td><td>—</td><td>114 unit + 6 E2E suites</td></tr>
+</table>
+
+Leverages Python's power with pure focus on Harness architecture—stripped of enterprise overhead like telemetry, OAuth complexity, and hundreds of React components.
+
+---
+
+## 🤔 What is an Agent Harness?
+
+An **Agent Harness** is the complete infrastructure that wraps around an LLM to make it a functional agent. The model provides intelligence; the harness provides **hands, eyes, memory, and safety boundaries**.
+
+<p align="center">
+  <img src="assets/harness-equation.png" alt="Harness = Tools + Knowledge + Observation + Action + Permissions" width="700">
+</p>
+
+OpenHarness is an open-source Python implementation designed for **researchers, builders, and the community**:
+
+- **Understand** how production AI agents work under the hood
+- **Experiment** with cutting-edge tools, skills, and agent coordination patterns
+- **Extend** the harness with custom plugins, providers, and domain knowledge
+- **Build** specialized agents on top of proven architecture
 
 ---
 
