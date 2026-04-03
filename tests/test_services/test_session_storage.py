@@ -8,7 +8,6 @@ from openharness.api.usage import UsageSnapshot
 from openharness.engine.messages import ConversationMessage, TextBlock
 from openharness.services.session_storage import (
     export_session_markdown,
-    get_project_session_dir,
     load_session_snapshot,
     save_session_snapshot,
 )

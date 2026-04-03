@@ -119,7 +119,6 @@ async def test_real_model_headless() -> tuple[bool, str]:
     if not settings["api_key"]:
         return False, "ANTHROPIC_AUTH_TOKEN not set"
 
-    from openharness.api.client import AnthropicApiClient
     from openharness.ui.app import run_print_mode
 
     try:

@@ -13,11 +13,12 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/python-≥3.11-blue?logo=python&logoColor=white" alt="Python">
+  <img src="https://img.shields.io/badge/python-≥3.10-blue?logo=python&logoColor=white" alt="Python">
   <img src="https://img.shields.io/badge/React+Ink-TUI-61DAFB?logo=react&logoColor=white" alt="React">
   <img src="https://img.shields.io/badge/pytest-114_pass-brightgreen" alt="Pytest">
   <img src="https://img.shields.io/badge/E2E-6_suites-orange" alt="E2E">
   <img src="https://img.shields.io/badge/output-text_|_json_|_stream--json-blueviolet" alt="Output">
+  <a href="https://github.com/HKUDS/OpenHarness/actions/workflows/ci.yml"><img src="https://github.com/HKUDS/OpenHarness/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="https://github.com/HKUDS/.github/blob/main/profile/README.md"><img src="https://img.shields.io/badge/Feishu-Group-E9DBFC?style=flat&logo=feishu&logoColor=white" alt="Feishu"></a>
   <a href="https://github.com/HKUDS/.github/blob/main/profile/README.md"><img src="https://img.shields.io/badge/WeChat-Group-C5EAB4?style=flat&logo=wechat&logoColor=white" alt="WeChat"></a>
 </p>
@@ -35,7 +36,6 @@ Supports CLI agent integration including OpenClaw, nanobot, Cursor, and more.
 </p>
 
 ---
-
 ## ✨ OpenHarness's Key Harness Features
 
 <table align="center" width="100%">
@@ -164,15 +164,30 @@ OpenHarness is an open-source Python implementation designed for **researchers, 
 
 - **2026-04-01** 🎨 **v0.1.0** — Initial **OpenHarness** open-source release featuring complete Harness architecture: 
 
+<p align="center">
+  <strong>Start here:</strong>
+  <a href="#-quick-start">Quick Start</a> ·
+  <a href="#-provider-compatibility">Provider Compatibility</a> ·
+  <a href="docs/SHOWCASE.md">Showcase</a> ·
+  <a href="CONTRIBUTING.md">Contributing</a> ·
+  <a href="CHANGELOG.md">Changelog</a>
+</p>
+
 ---
 
 ## 🚀 Quick Start
 
 ### Prerequisites
 
-- **Python 3.11+** and [uv](https://docs.astral.sh/uv/)
-- **Node.js 18+** (for the React terminal UI)
+- **Python 3.10+** and [uv](https://docs.astral.sh/uv/)
+- **Node.js 18+** (optional, for the React terminal UI)
 - An LLM API key
+
+### One-Command Demo
+
+```bash
+ANTHROPIC_API_KEY=your_key uv run oh -p "Inspect this repository and list the top 3 refactors"
+```
 
 ### Install & Run
 
@@ -208,6 +223,20 @@ oh -p "List all functions in main.py" --output-format json
 # Stream JSON events in real-time
 oh -p "Fix the bug" --output-format stream-json
 ```
+
+## 🔌 Provider Compatibility
+
+OpenHarness currently detects and adapts to a small set of provider profiles in code. The table below is intentionally conservative and reflects the profiles implemented in `src/openharness/api/provider.py`.
+
+| Provider profile | Detection signal | Auth kind | Voice mode | Notes |
+|------------------|------------------|-----------|------------|-------|
+| **Anthropic** | Default when no custom `ANTHROPIC_BASE_URL` is set | API key | Not wired in current build | Default Claude-oriented setup |
+| **Moonshot / Kimi** | `ANTHROPIC_BASE_URL` contains `moonshot` or model starts with `kimi` | API key | Not wired in current build | Works through an Anthropic-compatible endpoint |
+| **Vertex-compatible** | Base URL contains `vertex` or `aiplatform` | GCP | Not wired in current build | Good fit for Anthropic-style gateways on Vertex |
+| **Bedrock-compatible** | Base URL contains `bedrock` | AWS | Not wired in current build | Intended for Bedrock-style deployments |
+| **Generic Anthropic-compatible** | Any other explicit `ANTHROPIC_BASE_URL` | API key | Not wired in current build | Useful for proxies and internal gateways |
+
+If you are evaluating cross-provider workflows or want a concrete demo path, start with Anthropic or the Kimi example above, then compare behavior against your own compatible endpoint.
 
 ---
 
@@ -253,6 +282,20 @@ while True:
 ```
 
 The model decides **what** to do. The harness handles **how** — safely, efficiently, with full observability.
+
+### Harness Flow
+
+```mermaid
+flowchart LR
+    U[User Prompt] --> C[CLI or React TUI]
+    C --> R[RuntimeBundle]
+    R --> Q[QueryEngine]
+    Q --> A[Anthropic-compatible API Client]
+    A -->|tool_use| T[Tool Registry]
+    T --> P[Permissions + Hooks]
+    P --> X[Files Shell Web MCP Tasks]
+    X --> Q
+```
 
 ---
 
@@ -316,6 +359,16 @@ oh plugin list
 oh plugin install <source>
 oh plugin enable <name>
 ```
+
+### 🤝 Ecosystem Workflows
+
+OpenHarness is useful as a lightweight harness layer around Claude-style tooling conventions:
+
+- **OpenClaw-oriented workflows** can reuse Markdown-first knowledge and command-driven collaboration patterns.
+- **Claude-style plugins and skills** stay portable because OpenHarness keeps those formats familiar.
+- **ClawTeam-style multi-agent work** maps well onto the built-in team, task, and background execution primitives.
+
+For concrete usage ideas instead of generic claims, see [`docs/SHOWCASE.md`](docs/SHOWCASE.md).
 
 ### 🛡️ Permissions
 
@@ -443,6 +496,20 @@ Add commands in `commands/*.md`, hooks in `hooks/hooks.json`, agents in `agents/
 
 ---
 
+## 🌍 Showcase
+
+OpenHarness is most useful when treated as a small, inspectable harness you can adapt to a real workflow:
+
+- **Repo coding assistant** for reading code, patching files, and running checks locally.
+- **Headless scripting tool** for `json` and `stream-json` output in automation flows.
+- **Plugin and skill testbed** for experimenting with Claude-style extensions.
+- **Multi-agent prototype harness** for task delegation and background execution.
+- **Provider comparison sandbox** across Anthropic-compatible backends.
+
+See [`docs/SHOWCASE.md`](docs/SHOWCASE.md) for short, reproducible examples.
+
+---
+
 ## 🤝 Contributing
 
 OpenHarness is a **community-driven research project**. We welcome contributions in:
@@ -460,10 +527,16 @@ OpenHarness is a **community-driven research project**. We welcome contributions
 ```bash
 # Development setup
 git clone https://github.com/HKUDS/OpenHarness.git
-cd openharness
+cd OpenHarness
 uv sync --extra dev
 uv run pytest -q  # Verify everything works
 ```
+
+Useful contributor entry points:
+
+- [`CONTRIBUTING.md`](CONTRIBUTING.md) for setup, checks, and PR expectations
+- [`CHANGELOG.md`](CHANGELOG.md) for user-visible changes
+- [`docs/SHOWCASE.md`](docs/SHOWCASE.md) for real-world usage patterns worth documenting
 
 ---
 

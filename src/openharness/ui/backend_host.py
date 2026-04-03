@@ -8,7 +8,6 @@ import json
 import os
 import sys
 from dataclasses import dataclass
-from typing import Any
 from uuid import uuid4
 
 from openharness.api.client import SupportsStreamingMessages

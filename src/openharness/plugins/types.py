@@ -5,7 +5,6 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from openharness.hooks.schemas import HookDefinition
 from openharness.mcp.types import McpServerConfig
 from openharness.plugins.schemas import PluginManifest
 from openharness.skills.types import SkillDefinition

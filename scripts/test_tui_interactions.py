@@ -55,8 +55,6 @@ def test_command_picker_shows() -> tuple[bool, str]:
     try:
         child.expect(pexpect.EOF, timeout=25)
         output = child.before or ""
-        # Check for key UI elements
-        has_shortcuts = "send" in output.lower() or "enter" in output.lower()
         has_welcome = "Oh my Harness!" in output
         if has_welcome:
             return True, f"TUI launched with welcome banner and shortcuts. Output: {len(output)} chars"

@@ -7,7 +7,6 @@ from pathlib import Path
 
 import pytest
 
-from openharness.tasks import get_task_manager
 from openharness.tasks.manager import BackgroundTaskManager
 
 

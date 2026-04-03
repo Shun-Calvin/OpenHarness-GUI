@@ -13,7 +13,7 @@ from typing import Any
 import httpx
 
 from openharness.api.client import ApiMessageCompleteEvent, ApiMessageRequest, SupportsStreamingMessages
-from openharness.engine.messages import ConversationMessage, TextBlock
+from openharness.engine.messages import ConversationMessage
 from openharness.hooks.events import HookEvent
 from openharness.hooks.loader import HookRegistry
 from openharness.hooks.schemas import (

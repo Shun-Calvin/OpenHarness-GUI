@@ -8,7 +8,6 @@ import shlex
 import time
 from dataclasses import replace
 from pathlib import Path
-from typing import Any
 from uuid import uuid4
 
 from openharness.config.paths import get_tasks_dir

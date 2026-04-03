@@ -10,7 +10,6 @@ import asyncio
 import os
 import subprocess
 import sys
-import tempfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
@@ -43,7 +42,7 @@ def _run_oh(*args: str, timeout: int = 90) -> subprocess.CompletedProcess:
 
 async def test_api_retry_config() -> tuple[bool, str]:
     """Test that retry configuration is properly set up."""
-    from openharness.api.client import MAX_RETRIES, RETRYABLE_STATUS_CODES, _is_retryable, _get_retry_delay
+    from openharness.api.client import MAX_RETRIES, RETRYABLE_STATUS_CODES, _get_retry_delay
 
     if MAX_RETRIES != 3:
         return False, f"Expected MAX_RETRIES=3, got {MAX_RETRIES}"
