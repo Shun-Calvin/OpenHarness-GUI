@@ -248,58 +248,138 @@ def cron_logs_cmd(
 
 # ---- auth subcommands ----
 
-@auth_app.command("status")
-def auth_status_cmd() -> None:
-    """Show authentication status."""
-    from openharness.api.provider import auth_status, detect_provider
-    from openharness.config import load_settings
-
-    settings = load_settings()
-    provider = detect_provider(settings)
-    status = auth_status(settings)
-    print(f"Provider: {provider}")
-    print(f"Status:   {status}")
+# Mapping from provider name to human-readable label for interactive prompts.
+_PROVIDER_LABELS: dict[str, str] = {
+    "anthropic": "Anthropic (Claude API)",
+    "openai": "OpenAI / compatible",
+    "copilot": "GitHub Copilot",
+    "dashscope": "Alibaba DashScope",
+    "bedrock": "AWS Bedrock",
+    "vertex": "Google Vertex AI",
+}
 
 
 @auth_app.command("login")
 def auth_login(
-    api_key: str | None = typer.Option(None, "--api-key", "-k", help="API key"),
+    provider: Optional[str] = typer.Argument(None, help="Provider name (anthropic, openai, copilot, …)"),
 ) -> None:
-    """Configure authentication."""
-    from openharness.config import load_settings, save_settings
+    """Interactively authenticate with a provider.
 
-    if not api_key:
-        api_key = typer.prompt("Enter your API key", hide_input=True)
-    settings = load_settings()
-    settings.api_key = api_key
-    save_settings(settings)
-    print("API key saved.")
+    Run without arguments to choose a provider from a menu.
+    Supported providers: anthropic, openai, copilot, dashscope, bedrock, vertex.
+    """
+    from openharness.auth.flows import ApiKeyFlow
+    from openharness.auth.manager import AuthManager
+    from openharness.auth.storage import store_credential
+
+    manager = AuthManager()
+
+    if provider is None:
+        print("Select a provider to authenticate:", flush=True)
+        labels = list(_PROVIDER_LABELS.items())
+        for i, (name, label) in enumerate(labels, 1):
+            print(f"  {i}. {label} [{name}]", flush=True)
+        raw = typer.prompt("Enter number or provider name", default="1")
+        try:
+            idx = int(raw.strip()) - 1
+            if 0 <= idx < len(labels):
+                provider = labels[idx][0]
+            else:
+                print("Invalid selection.", file=sys.stderr)
+                raise typer.Exit(1)
+        except ValueError:
+            provider = raw.strip()
+
+    provider = provider.lower()
+
+    if provider == "copilot":
+        _run_copilot_login()
+        return
+
+    # API-key–based providers
+    if provider in ("anthropic", "openai", "dashscope", "bedrock", "vertex"):
+        label = _PROVIDER_LABELS.get(provider, provider)
+        flow = ApiKeyFlow(provider=provider, prompt_text=f"Enter your {label} API key")
+        try:
+            key = flow.run()
+        except ValueError as exc:
+            print(f"Error: {exc}", file=sys.stderr)
+            raise typer.Exit(1)
+        store_credential(provider, "api_key", key)
+        # Keep settings.api_key in sync for the active provider.
+        try:
+            manager.store_credential(provider, "api_key", key)
+        except Exception:
+            pass
+        print(f"{label} API key saved.", flush=True)
+        return
+
+    print(f"Unknown provider: {provider!r}. Known: {', '.join(_PROVIDER_LABELS)}", file=sys.stderr)
+    raise typer.Exit(1)
+
+
+@auth_app.command("status")
+def auth_status_cmd() -> None:
+    """Show authentication status for all providers in a table."""
+    from openharness.auth.manager import AuthManager
+
+    manager = AuthManager()
+    statuses = manager.get_auth_status()
+
+    col_provider = 22
+    col_status = 12
+    col_source = 10
+    header = f"{'Provider':<{col_provider}} {'Status':<{col_status}} {'Source':<{col_source}} Active"
+    print(header)
+    print("-" * len(header))
+
+    for name, info in statuses.items():
+        label = _PROVIDER_LABELS.get(name, name)
+        status_str = "configured" if info["configured"] else "missing"
+        source_str = info["source"]
+        active_str = "<-- active" if info["active"] else ""
+        print(f"{label:<{col_provider}} {status_str:<{col_status}} {source_str:<{col_source}} {active_str}")
 
 
 @auth_app.command("logout")
-def auth_logout() -> None:
-    """Remove stored authentication."""
-    from openharness.config import load_settings, save_settings
+def auth_logout(
+    provider: Optional[str] = typer.Argument(None, help="Provider to log out (default: active provider)"),
+) -> None:
+    """Clear stored authentication for a provider."""
+    from openharness.auth.manager import AuthManager
 
-    settings = load_settings()
-    settings.api_key = None
-    save_settings(settings)
-    print("Authentication cleared.")
+    manager = AuthManager()
+    target = provider or manager.get_active_provider()
+    manager.clear_credential(target)
+    print(f"Authentication cleared for provider: {target}", flush=True)
 
 
-@auth_app.command("copilot-login")
-def auth_copilot_login() -> None:
-    """Authenticate with GitHub Copilot via device flow."""
-    import platform
-    import subprocess
+@auth_app.command("switch")
+def auth_switch(
+    provider: str = typer.Argument(..., help="Provider to activate"),
+) -> None:
+    """Switch the active provider."""
+    from openharness.auth.manager import AuthManager
 
-    from openharness.api.copilot_auth import (
-        poll_for_access_token,
-        request_device_code,
-        save_copilot_auth,
-    )
+    manager = AuthManager()
+    try:
+        manager.switch_provider(provider)
+    except ValueError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        raise typer.Exit(1)
+    print(f"Switched active provider to: {provider}", flush=True)
 
-    # --- Deployment type selection ---
+
+# ---------------------------------------------------------------------------
+# Copilot login helper (kept as a named function for reuse and backward compat)
+# ---------------------------------------------------------------------------
+
+
+def _run_copilot_login() -> None:
+    """Run the GitHub Copilot device-code flow and persist the result."""
+    from openharness.api.copilot_auth import save_copilot_auth
+    from openharness.auth.flows import DeviceCodeFlow
+
     print("Select GitHub deployment type:", flush=True)
     print("  1. GitHub.com (public)", flush=True)
     print("  2. GitHub Enterprise (data residency / self-hosted)", flush=True)
@@ -309,10 +389,7 @@ def auth_copilot_login() -> None:
     github_domain = "github.com"
 
     if choice.strip() == "2":
-        raw_url = typer.prompt(
-            "Enter your GitHub Enterprise URL or domain (e.g. company.ghe.com)"
-        )
-        # Normalise: strip scheme and trailing slash
+        raw_url = typer.prompt("Enter your GitHub Enterprise URL or domain (e.g. company.ghe.com)")
         domain = raw_url.replace("https://", "").replace("http://", "").rstrip("/")
         if not domain:
             print("Error: domain cannot be empty.", file=sys.stderr, flush=True)
@@ -321,71 +398,29 @@ def auth_copilot_login() -> None:
         github_domain = domain
 
     print(flush=True)
-    print("Starting GitHub Copilot device flow...", flush=True)
-    dc = request_device_code(github_domain=github_domain)
-    print(flush=True)
-    print(f"  Open: {dc.verification_uri}", flush=True)
-    print(f"  Code: {dc.user_code}", flush=True)
-    print(flush=True)
-
-    # Attempt to open browser via platform command (non-blocking).
-    # Unlike webbrowser.open(), subprocess won't hang in WSL/headless.
-    _opened = False
+    flow = DeviceCodeFlow(github_domain=github_domain, enterprise_url=enterprise_url)
     try:
-        plat = platform.system()
-        if plat == "Darwin":
-            subprocess.Popen(["open", dc.verification_uri], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            _opened = True
-        elif plat == "Windows":
-            subprocess.Popen(["start", "", dc.verification_uri], shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            _opened = True
-        else:
-            # Linux / WSL — xdg-open may or may not work
-            result = subprocess.Popen(
-                ["xdg-open", dc.verification_uri],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-            )
-            # Give it a moment to fail fast if xdg-open is missing
-            try:
-                result.wait(timeout=2)
-                _opened = result.returncode == 0
-            except subprocess.TimeoutExpired:
-                _opened = True  # Probably launched something
-    except Exception:
-        pass
-
-    if _opened:
-        print("(Browser opened \u2014 enter the code shown above.)", flush=True)
-    else:
-        print("Open the URL above in your browser and enter the code.", flush=True)
-    print(flush=True)
-
-    def _show_progress(poll_num: int, elapsed: float) -> None:
-        mins = int(elapsed) // 60
-        secs = int(elapsed) % 60
-        print(f"\r  Polling... ({mins}m {secs:02d}s elapsed)", end="", flush=True)
-
-    print("Waiting for authorisation...", flush=True)
-    try:
-        token = poll_for_access_token(
-            dc.device_code, dc.interval,
-            github_domain=github_domain,
-            progress_callback=_show_progress,
-        )
+        token = flow.run()
     except RuntimeError as exc:
-        print(flush=True)  # newline after progress
         print(f"Error: {exc}", file=sys.stderr, flush=True)
         raise typer.Exit(1)
-    print(flush=True)  # newline after progress
+
     save_copilot_auth(token, enterprise_url=enterprise_url)
     print("GitHub Copilot authenticated successfully.", flush=True)
     if enterprise_url:
         print(f"  Enterprise domain: {enterprise_url}", flush=True)
     print(flush=True)
     print("To use Copilot as the provider, run:", flush=True)
-    print("  oh --api-format copilot", flush=True)
+    print("  oh auth switch copilot", flush=True)
     print("  # or set OPENHARNESS_API_FORMAT=copilot", flush=True)
+
+
+@auth_app.command("copilot-login")
+def auth_copilot_login() -> None:
+    """Authenticate with GitHub Copilot via device flow (alias for 'oh auth login copilot')."""
+    _run_copilot_login()
+
+
 @auth_app.command("copilot-logout")
 def auth_copilot_logout() -> None:
     """Remove stored GitHub Copilot authentication."""
