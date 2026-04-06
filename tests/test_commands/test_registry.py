@@ -78,13 +78,123 @@ async def test_permissions_command_persists(tmp_path: Path, monkeypatch):
 async def test_model_command_persists(tmp_path: Path, monkeypatch):
     monkeypatch.setenv("OPENHARNESS_CONFIG_DIR", str(tmp_path / "config"))
     registry = create_default_command_registry()
-    command, args = registry.lookup("/model set claude-opus-test")
+    command, args = registry.lookup("/model opus")
     assert command is not None
 
     result = await command.handler(args, CommandContext(engine=_make_engine(tmp_path), cwd=str(tmp_path)))
 
-    assert "claude-opus-test" in result.message
-    assert load_settings().model == "claude-opus-test"
+    assert "opus" in result.message
+    assert load_settings().resolve_profile()[1].last_model == "opus"
+    assert load_settings().model == "claude-opus-4-6"
+
+
+@pytest.mark.asyncio
+async def test_model_command_accepts_direct_value(tmp_path: Path, monkeypatch):
+    monkeypatch.setenv("OPENHARNESS_CONFIG_DIR", str(tmp_path / "config"))
+    registry = create_default_command_registry()
+    command, args = registry.lookup("/model gpt-5.4")
+    assert command is not None
+
+    result = await command.handler(args, CommandContext(engine=_make_engine(tmp_path), cwd=str(tmp_path)))
+
+    assert "gpt-5.4" in result.message
+    assert load_settings().model == "gpt-5.4"
+
+
+@pytest.mark.asyncio
+async def test_model_command_default_clears_profile_override(tmp_path: Path, monkeypatch):
+    monkeypatch.setenv("OPENHARNESS_CONFIG_DIR", str(tmp_path / "config"))
+    save_settings(
+        Settings().model_copy(
+            update={
+                "active_profile": "claude-api",
+                "profiles": {
+                    "claude-api": {
+                        "label": "Claude API",
+                        "provider": "anthropic",
+                        "api_format": "anthropic",
+                        "auth_source": "anthropic_api_key",
+                        "default_model": "sonnet",
+                        "last_model": "opus",
+                    }
+                },
+            }
+        )
+    )
+    registry = create_default_command_registry()
+    command, args = registry.lookup("/model default")
+    assert command is not None
+
+    result = await command.handler(args, CommandContext(engine=_make_engine(tmp_path), cwd=str(tmp_path)))
+
+    assert "reset to default" in result.message
+    assert load_settings().resolve_profile()[1].last_model == ""
+    assert load_settings().model == "claude-sonnet-4-6"
+
+
+@pytest.mark.asyncio
+async def test_turns_show_reports_unlimited_engine_when_session_is_unbounded(tmp_path: Path, monkeypatch):
+    monkeypatch.setenv("OPENHARNESS_CONFIG_DIR", str(tmp_path / "config"))
+    registry = create_default_command_registry()
+    context = _make_context(tmp_path)
+    context.engine.set_max_turns(None)
+
+    command, args = registry.lookup("/turns show")
+    assert command is not None
+
+    result = await command.handler(args, context)
+
+    assert "Max turns (engine): unlimited" in result.message
+
+
+@pytest.mark.asyncio
+async def test_turns_command_accepts_unlimited(tmp_path: Path, monkeypatch):
+    monkeypatch.setenv("OPENHARNESS_CONFIG_DIR", str(tmp_path / "config"))
+    registry = create_default_command_registry()
+    context = _make_context(tmp_path)
+
+    command, args = registry.lookup("/turns unlimited")
+    assert command is not None
+
+    result = await command.handler(args, context)
+
+    assert "unlimited for this session" in result.message
+    assert context.engine.max_turns is None
+
+
+@pytest.mark.asyncio
+async def test_provider_command_switches_profile_and_requests_runtime_refresh(tmp_path: Path, monkeypatch):
+    monkeypatch.setenv("OPENHARNESS_CONFIG_DIR", str(tmp_path / "config"))
+    save_settings(
+        Settings().model_copy(
+            update={
+                "profiles": {
+                    "kimi-anthropic": {
+                        "label": "Kimi Anthropic",
+                        "provider": "anthropic",
+                        "api_format": "anthropic",
+                        "auth_source": "anthropic_api_key",
+                        "default_model": "kimi-k2.5",
+                        "last_model": "kimi-k2.5",
+                        "base_url": "https://api.moonshot.cn/anthropic",
+                    }
+                }
+            }
+        )
+    )
+    registry = create_default_command_registry()
+    context = _make_context(tmp_path)
+
+    command, args = registry.lookup("/provider kimi-anthropic")
+    assert command is not None
+
+    result = await command.handler(args, context)
+
+    loaded = load_settings()
+    assert result.refresh_runtime is True
+    assert loaded.active_profile == "kimi-anthropic"
+    assert loaded.base_url == "https://api.moonshot.cn/anthropic"
+    assert loaded.model == "kimi-k2.5"
 
 
 @pytest.mark.asyncio

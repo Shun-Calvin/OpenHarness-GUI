@@ -27,11 +27,20 @@ const scriptedSteps = (() => {
 	}
 })();
 
-const PERMISSION_MODES: SelectOption[] = [
-	{value: 'default', label: 'Default', description: 'Ask before write/execute operations'},
-	{value: 'full_auto', label: 'Auto', description: 'Allow all tools automatically'},
-	{value: 'plan', label: 'Plan Mode', description: 'Block all write operations'},
-];
+const SELECTABLE_COMMANDS = new Set([
+	'/provider',
+	'/model',
+	'/theme',
+	'/output-style',
+	'/permissions',
+	'/resume',
+	'/effort',
+	'/passes',
+	'/turns',
+	'/fast',
+	'/vim',
+	'/voice',
+]);
 
 type SelectModalState = {
 	title: string;
@@ -60,6 +69,13 @@ function AppInner({config}: {config: FrontendConfig}): React.JSX.Element {
 	const [selectModal, setSelectModal] = useState<SelectModalState>(null);
 	const [selectIndex, setSelectIndex] = useState(0);
 	const session = useBackendSession(config, () => exit());
+
+	useEffect(() => {
+		const nextTheme = session.status.theme;
+		if (typeof nextTheme === 'string' && nextTheme) {
+			setThemeName(nextTheme);
+		}
+	}, [session.status.theme, setThemeName]);
 
 	// Current tool name for spinner
 	const currentToolName = useMemo(() => {
@@ -100,12 +116,13 @@ function AppInner({config}: {config: FrontendConfig}): React.JSX.Element {
 			session.setSelectRequest(null);
 			return;
 		}
-		setSelectIndex(0);
+		const initialIndex = req.options.findIndex((option) => option.active);
+		setSelectIndex(initialIndex >= 0 ? initialIndex : 0);
 		setSelectModal({
 			title: req.title,
-			options: req.options.map((o) => ({value: o.value, label: o.label, description: o.description})),
+			options: req.options.map((o) => ({value: o.value, label: o.label, description: o.description, active: o.active})),
 			onSelect: (value) => {
-				session.sendRequest({type: 'submit_line', line: `${req.submitPrefix}${value}`});
+				session.sendRequest({type: 'apply_select_command', command: req.command, value});
 				session.setBusy(true);
 				setSelectModal(null);
 			},
@@ -117,31 +134,14 @@ function AppInner({config}: {config: FrontendConfig}): React.JSX.Element {
 	const handleCommand = (cmd: string): boolean => {
 		const trimmed = cmd.trim();
 
-		// /theme set <name> → switch theme locally
-		const themeMatch = /^\/theme\s+set\s+(\S+)$/.exec(trimmed);
-		if (themeMatch) {
-			setThemeName(themeMatch[1]);
+		if (SELECTABLE_COMMANDS.has(trimmed)) {
+			session.sendRequest({type: 'select_command', command: trimmed.slice(1)});
 			return true;
 		}
 
 		// /permissions → show mode picker
 		if (trimmed === '/permissions' || trimmed === '/permissions show') {
-			const currentMode = String(session.status.permission_mode ?? 'default');
-			const options = PERMISSION_MODES.map((opt) => ({
-				...opt,
-				active: opt.value === currentMode,
-			}));
-			const initialIndex = options.findIndex((o) => o.active);
-			setSelectIndex(initialIndex >= 0 ? initialIndex : 0);
-			setSelectModal({
-				title: 'Permission Mode',
-				options,
-				onSelect: (value) => {
-					session.sendRequest({type: 'submit_line', line: `/permissions set ${value}`});
-					session.setBusy(true);
-					setSelectModal(null);
-				},
-			});
+			session.sendRequest({type: 'select_command', command: 'permissions'});
 			return true;
 		}
 
@@ -159,7 +159,7 @@ function AppInner({config}: {config: FrontendConfig}): React.JSX.Element {
 
 		// /resume → request session list from backend (will trigger select_request)
 		if (trimmed === '/resume') {
-			session.sendRequest({type: 'list_sessions'});
+			session.sendRequest({type: 'select_command', command: 'resume'});
 			return true;
 		}
 

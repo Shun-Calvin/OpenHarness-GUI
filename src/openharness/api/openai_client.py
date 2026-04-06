@@ -12,6 +12,7 @@ from openai import AsyncOpenAI
 from openharness.api.client import (
     ApiMessageCompleteEvent,
     ApiMessageRequest,
+    ApiRetryEvent,
     ApiStreamEvent,
     ApiTextDeltaEvent,
 )
@@ -200,6 +201,12 @@ class OpenAICompatibleClient:
                 log.warning(
                     "OpenAI API request failed (attempt %d/%d), retrying in %.1fs: %s",
                     attempt + 1, MAX_RETRIES + 1, delay, exc,
+                )
+                yield ApiRetryEvent(
+                    message=str(exc),
+                    attempt=attempt + 1,
+                    max_attempts=MAX_RETRIES + 1,
+                    delay_seconds=delay,
                 )
                 await asyncio.sleep(delay)
 

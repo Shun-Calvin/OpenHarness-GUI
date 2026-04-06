@@ -19,6 +19,8 @@ from openharness.config.settings import load_settings, save_settings
 from openharness.engine.stream_events import (
     AssistantTextDelta,
     AssistantTurnComplete,
+    ErrorEvent,
+    StatusEvent,
     StreamEvent,
     ToolExecutionCompleted,
     ToolExecutionStarted,
@@ -329,6 +331,15 @@ class OpenHarnessTerminalApp(App[None]):
         if isinstance(event, ToolExecutionCompleted):
             prefix = "tool-error>" if event.is_error else "tool-result>"
             self._append_line(f"{prefix} {event.tool_name}: {event.output}")
+            return
+
+        if isinstance(event, ErrorEvent):
+            self._append_line(f"error> {event.message}")
+            self._assistant_buffer = ""
+            self._set_current_response("Ready.")
+            return
+        if isinstance(event, StatusEvent):
+            self._append_line(f"system> {event.message}")
 
     def action_clear_conversation(self) -> None:
         if self._bundle is None:

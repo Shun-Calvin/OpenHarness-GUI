@@ -8,12 +8,14 @@ from pathlib import Path
 from typing import Any, Awaitable, Callable
 
 from openharness.api.client import AnthropicApiClient, SupportsStreamingMessages
+from openharness.api.codex_client import CodexApiClient
 from openharness.api.copilot_client import CopilotClient
 from openharness.api.openai_client import OpenAICompatibleClient
 from openharness.api.provider import auth_status, detect_provider
 from openharness.bridge import get_bridge_manager
 from openharness.commands import CommandContext, CommandResult, create_default_command_registry
 from openharness.config import get_config_file_path, load_settings
+from openharness.config.settings import display_model_setting
 from openharness.engine import QueryEngine
 from openharness.engine.messages import ConversationMessage, ToolResultBlock, ToolUseBlock
 from openharness.engine.query import MaxTurnsExceeded
@@ -50,6 +52,7 @@ class RuntimeBundle:
     engine: QueryEngine
     commands: object
     external_api_client: bool
+    enforce_max_turns: bool = True
     session_id: str = ""
     settings_overrides: dict[str, Any] = field(default_factory=dict)
 
@@ -99,6 +102,43 @@ class RuntimeBundle:
         return "\n".join(lines)
 
 
+def _resolve_api_client_from_settings(settings) -> SupportsStreamingMessages:
+    """Build the appropriate API client for the resolved settings."""
+    if settings.api_format == "copilot":
+        from openharness.api.copilot_client import COPILOT_DEFAULT_MODEL
+
+        copilot_model = (
+            COPILOT_DEFAULT_MODEL
+            if settings.model in {"claude-sonnet-4-20250514", "claude-sonnet-4-6", "sonnet", "default"}
+            else settings.model
+        )
+        return CopilotClient(model=copilot_model)
+    if settings.provider == "openai_codex":
+        auth = settings.resolve_auth()
+        return CodexApiClient(
+            auth_token=auth.value,
+            base_url=settings.base_url,
+        )
+    if settings.provider == "anthropic_claude":
+        return AnthropicApiClient(
+            auth_token=settings.resolve_auth().value,
+            base_url=settings.base_url,
+            claude_oauth=True,
+            auth_token_resolver=lambda: settings.resolve_auth().value,
+        )
+    if settings.api_format == "openai":
+        auth = settings.resolve_auth()
+        return OpenAICompatibleClient(
+            api_key=auth.value,
+            base_url=settings.base_url,
+        )
+    auth = settings.resolve_auth()
+    return AnthropicApiClient(
+        api_key=auth.value,
+        base_url=settings.base_url,
+    )
+
+
 async def build_runtime(
     *,
     prompt: str | None = None,
@@ -112,6 +152,7 @@ async def build_runtime(
     permission_prompt: PermissionPrompt | None = None,
     ask_user_prompt: AskUserPrompt | None = None,
     restore_messages: list[dict] | None = None,
+    enforce_max_turns: bool = True,
 ) -> RuntimeBundle:
     """Build the shared runtime for an OpenHarness session."""
     settings_overrides: dict[str, Any] = {
@@ -127,28 +168,17 @@ async def build_runtime(
     plugins = load_plugins(settings, cwd)
     if api_client:
         resolved_api_client = api_client
-    elif settings.api_format == "copilot":
-        from openharness.api.copilot_client import COPILOT_DEFAULT_MODEL
-        copilot_model = settings.model if settings.model != "claude-sonnet-4-20250514" else COPILOT_DEFAULT_MODEL
-        resolved_api_client = CopilotClient(model=copilot_model)
-    elif settings.api_format == "openai":
-        resolved_api_client = OpenAICompatibleClient(
-            api_key=settings.resolve_api_key(),
-            base_url=settings.base_url,
-        )
     else:
-        resolved_api_client = AnthropicApiClient(
-            api_key=settings.resolve_api_key(),
-            base_url=settings.base_url,
-        )
+        resolved_api_client = _resolve_api_client_from_settings(settings)
     mcp_manager = McpClientManager(load_mcp_server_configs(settings, plugins))
     await mcp_manager.connect_all()
     tool_registry = create_default_tool_registry(mcp_manager)
     provider = detect_provider(settings)
+    _, active_profile = settings.resolve_profile()
     bridge_manager = get_bridge_manager()
     app_state = AppStateStore(
         AppState(
-            model=settings.model,
+            model=display_model_setting(active_profile),
             permission_mode=settings.permission.mode.value,
             theme=settings.theme,
             cwd=cwd,
@@ -178,6 +208,7 @@ async def build_runtime(
             default_model=settings.model,
         ),
     )
+    engine_max_turns = settings.max_turns if (enforce_max_turns or max_turns is not None) else None
     engine = QueryEngine(
         api_client=resolved_api_client,
         tool_registry=tool_registry,
@@ -186,7 +217,7 @@ async def build_runtime(
         model=settings.model,
         system_prompt=build_runtime_system_prompt(settings, cwd=cwd, latest_user_prompt=prompt),
         max_tokens=settings.max_tokens,
-        max_turns=settings.max_turns,
+        max_turns=engine_max_turns,
         permission_prompt=permission_prompt,
         ask_user_prompt=ask_user_prompt,
         hook_executor=hook_executor,
@@ -211,6 +242,7 @@ async def build_runtime(
         engine=engine,
         commands=create_default_command_registry(),
         external_api_client=api_client is not None,
+        enforce_max_turns=enforce_max_turns or max_turns is not None,
         session_id=uuid4().hex[:12],
         settings_overrides=settings_overrides,
     )
@@ -292,17 +324,19 @@ def _format_pending_tool_results(messages: list[ConversationMessage]) -> str | N
     if len(tool_results) > max_results:
         lines.append(f"(+{len(tool_results) - max_results} more tool results)")
 
-    lines.append("To continue from these results, run: /continue 32 (or any count).")
+    lines.append("To continue from these results, run: /continue [COUNT].")
     return "\n".join(lines)
 
 
 def sync_app_state(bundle: RuntimeBundle) -> None:
     """Refresh UI state from current settings and dynamic keybindings."""
     settings = bundle.current_settings()
-    bundle.engine.set_max_turns(settings.max_turns)
+    if bundle.enforce_max_turns:
+        bundle.engine.set_max_turns(settings.max_turns)
     provider = detect_provider(settings)
+    _, active_profile = settings.resolve_profile()
     bundle.app_state.set(
-        model=settings.model,
+        model=display_model_setting(active_profile),
         permission_mode=settings.permission.mode.value,
         theme=settings.theme,
         cwd=bundle.cwd,
@@ -322,6 +356,20 @@ def sync_app_state(bundle: RuntimeBundle) -> None:
         output_style=settings.output_style,
         keybindings=load_keybindings(),
     )
+
+
+def refresh_runtime_client(bundle: RuntimeBundle) -> None:
+    """Refresh the active runtime client after provider/auth/profile changes."""
+    settings = bundle.current_settings()
+    if not bundle.external_api_client:
+        bundle.api_client = _resolve_api_client_from_settings(settings)
+        bundle.engine.set_api_client(bundle.api_client)
+        bundle.hook_executor.update_context(
+            api_client=bundle.api_client,
+            default_model=settings.model,
+        )
+    bundle.engine.set_model(settings.model)
+    sync_app_state(bundle)
 
 
 async def handle_line(
@@ -353,10 +401,13 @@ async def handle_line(
                 app_state=bundle.app_state,
             ),
         )
+        if result.refresh_runtime:
+            refresh_runtime_client(bundle)
         await _render_command_result(result, print_system, clear_output, render_event)
         if result.continue_pending:
             settings = bundle.current_settings()
-            bundle.engine.set_max_turns(settings.max_turns)
+            if bundle.enforce_max_turns:
+                bundle.engine.set_max_turns(settings.max_turns)
             system_prompt = build_runtime_system_prompt(
                 settings,
                 cwd=bundle.cwd,
@@ -384,7 +435,8 @@ async def handle_line(
         return not result.should_exit
 
     settings = bundle.current_settings()
-    bundle.engine.set_max_turns(settings.max_turns)
+    if bundle.enforce_max_turns:
+        bundle.engine.set_max_turns(settings.max_turns)
     system_prompt = build_runtime_system_prompt(settings, cwd=bundle.cwd, latest_user_prompt=line)
     bundle.engine.set_system_prompt(system_prompt)
     try:

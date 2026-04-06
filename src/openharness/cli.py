@@ -37,11 +37,13 @@ app = typer.Typer(
 mcp_app = typer.Typer(name="mcp", help="Manage MCP servers")
 plugin_app = typer.Typer(name="plugin", help="Manage plugins")
 auth_app = typer.Typer(name="auth", help="Manage authentication")
+provider_app = typer.Typer(name="provider", help="Manage provider profiles")
 cron_app = typer.Typer(name="cron", help="Manage cron scheduler and jobs")
 
 app.add_typer(mcp_app)
 app.add_typer(plugin_app)
 app.add_typer(auth_app)
+app.add_typer(provider_app)
 app.add_typer(cron_app)
 
 
@@ -260,12 +262,84 @@ def cron_logs_cmd(
 # Mapping from provider name to human-readable label for interactive prompts.
 _PROVIDER_LABELS: dict[str, str] = {
     "anthropic": "Anthropic (Claude API)",
+    "anthropic_claude": "Claude subscription (Claude CLI)",
     "openai": "OpenAI / compatible",
+    "openai_codex": "OpenAI Codex subscription (Codex CLI)",
     "copilot": "GitHub Copilot",
     "dashscope": "Alibaba DashScope",
     "bedrock": "AWS Bedrock",
     "vertex": "Google Vertex AI",
 }
+
+_AUTH_SOURCE_LABELS: dict[str, str] = {
+    "anthropic_api_key": "Anthropic API key",
+    "openai_api_key": "OpenAI API key",
+    "codex_subscription": "Codex subscription",
+    "claude_subscription": "Claude subscription",
+    "copilot_oauth": "GitHub Copilot OAuth",
+    "dashscope_api_key": "DashScope API key",
+    "bedrock_api_key": "Bedrock credentials",
+    "vertex_api_key": "Vertex credentials",
+}
+
+
+def _maybe_update_default_model_for_provider(provider: str) -> None:
+    """Keep the active model in-family after switching auth providers."""
+    from openharness.auth.manager import AuthManager
+
+    manager = AuthManager()
+    profile_name = {
+        "openai_codex": "codex",
+        "anthropic_claude": "claude-subscription",
+    }.get(provider)
+    if profile_name is None:
+        return
+    profile = manager.list_profiles()[profile_name]
+    model = profile.resolved_model.lower()
+    target_model = None
+    if provider == "openai_codex" and not model.startswith(("gpt-", "o1", "o3", "o4")):
+        target_model = "gpt-5.4"
+    elif provider == "anthropic_claude" and not model.startswith("claude-"):
+        target_model = "sonnet"
+    if not target_model:
+        return
+    manager.update_profile(profile_name, default_model=target_model, last_model=target_model)
+
+
+def _bind_external_provider(provider: str) -> None:
+    """Bind a provider to credentials managed by an external CLI."""
+    from openharness.auth.external import default_binding_for_provider, load_external_credential
+    from openharness.auth.storage import store_external_binding
+
+    binding = default_binding_for_provider(provider)
+    try:
+        credential = load_external_credential(
+            binding,
+            refresh_if_needed=(provider == "anthropic_claude"),
+        )
+    except ValueError as exc:
+        print(f"Error: {exc}", file=sys.stderr, flush=True)
+        raise typer.Exit(1)
+
+    profile_label = credential.profile_label or binding.profile_label
+    store_external_binding(
+        binding.__class__(
+            provider=binding.provider,
+            source_path=binding.source_path,
+            source_kind=binding.source_kind,
+            managed_by=binding.managed_by,
+            profile_label=profile_label,
+        )
+    )
+
+    _maybe_update_default_model_for_provider(provider)
+    label = _PROVIDER_LABELS.get(provider, provider)
+    profile_name = {
+        "openai_codex": "codex",
+        "anthropic_claude": "claude-subscription",
+    }[provider]
+    print(f"{label} bound from {credential.source_path}.", flush=True)
+    print(f"Use `oh provider use {profile_name}` to activate it.", flush=True)
 
 
 @auth_app.command("login")
@@ -275,7 +349,7 @@ def auth_login(
     """Interactively authenticate with a provider.
 
     Run without arguments to choose a provider from a menu.
-    Supported providers: anthropic, openai, copilot, dashscope, bedrock, vertex.
+    Supported providers: anthropic, anthropic_claude, openai, openai_codex, copilot, dashscope, bedrock, vertex.
     """
     from openharness.auth.flows import ApiKeyFlow
     from openharness.auth.manager import AuthManager
@@ -305,6 +379,10 @@ def auth_login(
         _run_copilot_login()
         return
 
+    if provider in ("openai_codex", "anthropic_claude"):
+        _bind_external_provider(provider)
+        return
+
     # API-key–based providers
     if provider in ("anthropic", "openai", "dashscope", "bedrock", "vertex"):
         label = _PROVIDER_LABELS.get(provider, provider)
@@ -315,7 +393,6 @@ def auth_login(
             print(f"Error: {exc}", file=sys.stderr)
             raise typer.Exit(1)
         store_credential(provider, "api_key", key)
-        # Keep settings.api_key in sync for the active provider.
         try:
             manager.store_credential(provider, "api_key", key)
         except Exception:
@@ -329,25 +406,31 @@ def auth_login(
 
 @auth_app.command("status")
 def auth_status_cmd() -> None:
-    """Show authentication status for all providers in a table."""
+    """Show authentication source and provider profile status."""
     from openharness.auth.manager import AuthManager
 
     manager = AuthManager()
-    statuses = manager.get_auth_status()
+    auth_sources = manager.get_auth_source_statuses()
+    profiles = manager.get_profile_statuses()
 
-    col_provider = 22
-    col_status = 12
-    col_source = 10
-    header = f"{'Provider':<{col_provider}} {'Status':<{col_status}} {'Source':<{col_source}} Active"
-    print(header)
-    print("-" * len(header))
-
-    for name, info in statuses.items():
-        label = _PROVIDER_LABELS.get(name, name)
-        status_str = "configured" if info["configured"] else "missing"
-        source_str = info["source"]
+    print("Auth sources:")
+    print(f"{'Source':<24} {'State':<14} {'Origin':<10} Active")
+    print("-" * 60)
+    for name, info in auth_sources.items():
+        label = _AUTH_SOURCE_LABELS.get(name, name)
         active_str = "<-- active" if info["active"] else ""
-        print(f"{label:<{col_provider}} {status_str:<{col_status}} {source_str:<{col_source}} {active_str}")
+        print(f"{label:<24} {info['state']:<14} {info['source']:<10} {active_str}")
+        if info.get("detail"):
+            print(f"  detail: {info['detail']}")
+
+    print()
+    print("Provider profiles:")
+    print(f"{'Profile':<20} {'Provider':<18} {'Auth source':<22} {'State':<12} Active")
+    print("-" * 92)
+    for name, info in profiles.items():
+        status_str = "ready" if info["configured"] else info.get("auth_state", "missing auth")
+        active_str = "<-- active" if info["active"] else ""
+        print(f"{name:<20} {info['provider']:<18} {info['auth_source']:<22} {status_str:<12} {active_str}")
 
 
 @auth_app.command("logout")
@@ -358,16 +441,16 @@ def auth_logout(
     from openharness.auth.manager import AuthManager
 
     manager = AuthManager()
-    target = provider or manager.get_active_provider()
+    target = provider or manager.list_profiles()[manager.get_active_profile()].provider
     manager.clear_credential(target)
     print(f"Authentication cleared for provider: {target}", flush=True)
 
 
 @auth_app.command("switch")
 def auth_switch(
-    provider: str = typer.Argument(..., help="Provider to activate"),
+    provider: str = typer.Argument(..., help="Auth source or profile to activate"),
 ) -> None:
-    """Switch the active provider."""
+    """Switch the auth source for the active profile, or use a profile by name."""
     from openharness.auth.manager import AuthManager
 
     manager = AuthManager()
@@ -376,7 +459,7 @@ def auth_switch(
     except ValueError as exc:
         print(f"Error: {exc}", file=sys.stderr)
         raise typer.Exit(1)
-    print(f"Switched active provider to: {provider}", flush=True)
+    print(f"Switched auth/profile to: {provider}", flush=True)
 
 
 # ---------------------------------------------------------------------------
@@ -420,14 +503,25 @@ def _run_copilot_login() -> None:
         print(f"  Enterprise domain: {enterprise_url}", flush=True)
     print(flush=True)
     print("To use Copilot as the provider, run:", flush=True)
-    print("  oh auth switch copilot", flush=True)
-    print("  # or set OPENHARNESS_API_FORMAT=copilot", flush=True)
+    print("  oh provider use copilot", flush=True)
 
 
 @auth_app.command("copilot-login")
 def auth_copilot_login() -> None:
     """Authenticate with GitHub Copilot via device flow (alias for 'oh auth login copilot')."""
     _run_copilot_login()
+
+
+@auth_app.command("codex-login")
+def auth_codex_login() -> None:
+    """Bind OpenHarness to a local Codex CLI subscription session."""
+    _bind_external_provider("openai_codex")
+
+
+@auth_app.command("claude-login")
+def auth_claude_login() -> None:
+    """Bind OpenHarness to a local Claude CLI subscription session."""
+    _bind_external_provider("anthropic_claude")
 
 
 @auth_app.command("copilot-logout")
@@ -437,6 +531,116 @@ def auth_copilot_logout() -> None:
 
     clear_github_token()
     print("Copilot authentication cleared.")
+
+
+# ---- provider subcommands ----
+
+
+@provider_app.command("list")
+def provider_list() -> None:
+    """List configured provider profiles."""
+    from openharness.auth.manager import AuthManager
+
+    statuses = AuthManager().get_profile_statuses()
+    for name, info in statuses.items():
+        marker = "*" if info["active"] else " "
+        configured = "ready" if info["configured"] else "missing auth"
+        base = info["base_url"] or "(default)"
+        print(f"{marker} {name}: {info['label']} [{configured}]")
+        print(f"    provider={info['provider']} auth={info['auth_source']} model={info['model']} base_url={base}")
+
+
+@provider_app.command("use")
+def provider_use(
+    name: str = typer.Argument(..., help="Provider profile name"),
+) -> None:
+    """Activate a provider profile."""
+    from openharness.auth.manager import AuthManager
+
+    manager = AuthManager()
+    try:
+        manager.use_profile(name)
+    except ValueError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        raise typer.Exit(1)
+    print(f"Activated provider profile: {name}", flush=True)
+
+
+@provider_app.command("add")
+def provider_add(
+    name: str = typer.Argument(..., help="Provider profile name"),
+    label: str = typer.Option(..., "--label", help="Display label"),
+    provider: str = typer.Option(..., "--provider", help="Runtime provider id"),
+    api_format: str = typer.Option(..., "--api-format", help="API format"),
+    auth_source: str = typer.Option(..., "--auth-source", help="Auth source name"),
+    model: str = typer.Option(..., "--model", help="Default model"),
+    base_url: str | None = typer.Option(None, "--base-url", help="Optional base URL"),
+) -> None:
+    """Create a provider profile."""
+    from openharness.auth.manager import AuthManager
+    from openharness.config.settings import ProviderProfile
+
+    manager = AuthManager()
+    manager.upsert_profile(
+        name,
+        ProviderProfile(
+            label=label,
+            provider=provider,
+            api_format=api_format,
+            auth_source=auth_source,
+            default_model=model,
+            last_model=model,
+            base_url=base_url,
+        ),
+    )
+    print(f"Saved provider profile: {name}", flush=True)
+
+
+@provider_app.command("edit")
+def provider_edit(
+    name: str = typer.Argument(..., help="Provider profile name"),
+    label: str | None = typer.Option(None, "--label", help="Display label"),
+    provider: str | None = typer.Option(None, "--provider", help="Runtime provider id"),
+    api_format: str | None = typer.Option(None, "--api-format", help="API format"),
+    auth_source: str | None = typer.Option(None, "--auth-source", help="Auth source name"),
+    model: str | None = typer.Option(None, "--model", help="Default model"),
+    base_url: str | None = typer.Option(None, "--base-url", help="Optional base URL"),
+) -> None:
+    """Edit a provider profile."""
+    from openharness.auth.manager import AuthManager
+
+    manager = AuthManager()
+    try:
+        manager.update_profile(
+            name,
+            label=label,
+            provider=provider,
+            api_format=api_format,
+            auth_source=auth_source,
+            default_model=model,
+            last_model=model,
+            base_url=base_url,
+        )
+    except ValueError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        raise typer.Exit(1)
+    print(f"Updated provider profile: {name}", flush=True)
+
+
+@provider_app.command("remove")
+def provider_remove(
+    name: str = typer.Argument(..., help="Provider profile name"),
+) -> None:
+    """Remove a provider profile."""
+    from openharness.auth.manager import AuthManager
+
+    manager = AuthManager()
+    try:
+        manager.remove_profile(name)
+    except ValueError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        raise typer.Exit(1)
+    print(f"Removed provider profile: {name}", flush=True)
 
 # ---------------------------------------------------------------------------
 # Main command
@@ -498,7 +702,7 @@ def main(
     max_turns: int | None = typer.Option(
         None,
         "--max-turns",
-        help="Maximum number of agentic turns (useful with --print)",
+        help="Maximum number of agentic turns (enforced by default in --print; optional cap for interactive mode)",
         rich_help_panel="Model & Effort",
     ),
     # --- Output ---

@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, Awaitable, Callable, Literal, get_args
 
 import pyperclip
 
+from openharness.auth.manager import AuthManager
 from openharness.config.paths import (
     get_config_dir,
     get_data_dir,
@@ -25,7 +26,7 @@ from openharness.bridge import get_bridge_manager
 from openharness.bridge.types import WorkSecret
 from openharness.bridge.work_secret import build_sdk_url, decode_work_secret, encode_work_secret
 from openharness.api.provider import auth_status, detect_provider
-from openharness.config.settings import Settings, load_settings, save_settings
+from openharness.config.settings import Settings, display_model_setting, load_settings, save_settings
 from openharness.engine.messages import ConversationMessage
 from openharness.engine.query_engine import QueryEngine
 from openharness.memory import (
@@ -66,6 +67,7 @@ class CommandResult:
     replay_messages: list | None = None  # ConversationMessage list to replay in TUI
     continue_pending: bool = False
     continue_turns: int | None = None
+    refresh_runtime: bool = False
 
 
 @dataclass
@@ -220,10 +222,12 @@ def create_default_command_registry() -> CommandRegistry:
     async def _status_handler(_: str, context: CommandContext) -> CommandResult:
         usage = context.engine.total_usage
         state = context.app_state.get() if context.app_state is not None else None
+        manager = AuthManager()
         return CommandResult(
             message=(
                 f"Messages: {len(context.engine.messages)}\n"
                 f"Usage: input={usage.input_tokens} output={usage.output_tokens}\n"
+                f"Profile: {manager.get_active_profile()}\n"
                 f"Effort: {state.effort if state is not None else load_settings().effort}\n"
                 f"Passes: {state.passes if state is not None else load_settings().passes}"
             )
@@ -693,6 +697,8 @@ def create_default_command_registry() -> CommandRegistry:
     async def _login_handler(args: str, context: CommandContext) -> CommandResult:
         del context
         settings = load_settings()
+        manager = AuthManager(settings)
+        profile_name, profile = settings.resolve_profile()
         provider = detect_provider(settings)
         api_key = args.strip()
         if not api_key:
@@ -704,7 +710,9 @@ def create_default_command_registry() -> CommandRegistry:
             return CommandResult(
                 message=(
                     f"Auth status:\n"
+                    f"- profile: {profile_name}\n"
                     f"- provider: {provider.name}\n"
+                    f"- auth_source: {profile.auth_source}\n"
                     f"- auth_status: {auth_status(settings)}\n"
                     f"- base_url: {settings.base_url or '(default)'}\n"
                     f"- model: {settings.model}\n"
@@ -712,15 +720,14 @@ def create_default_command_registry() -> CommandRegistry:
                     "Usage: /login API_KEY"
                 )
             )
-        settings.api_key = api_key
-        save_settings(settings)
+        manager.store_credential(profile.provider, "api_key", api_key)
         return CommandResult(message="Stored API key in ~/.openharness/settings.json")
 
     async def _logout_handler(_: str, context: CommandContext) -> CommandResult:
         del context
         settings = load_settings()
-        settings.api_key = ""
-        save_settings(settings)
+        provider = settings.resolve_profile()[1].provider
+        AuthManager(settings).clear_credential(provider)
         return CommandResult(message="Cleared stored API key.")
 
     async def _feedback_handler(args: str, context: CommandContext) -> CommandResult:
@@ -799,13 +806,14 @@ def create_default_command_registry() -> CommandRegistry:
 
     async def _turns_handler(args: str, context: CommandContext) -> CommandResult:
         settings = load_settings()
+        engine_turns = "unlimited" if context.engine.max_turns is None else str(context.engine.max_turns)
         tokens = args.split()
         if not tokens or tokens[0] == "show":
             return CommandResult(
                 message=(
-                    f"Max turns (engine): {context.engine.max_turns}\n"
+                    f"Max turns (engine): {engine_turns}\n"
                     f"Max turns (config): {settings.max_turns}\n"
-                    "Usage: /turns [show|COUNT]"
+                    "Usage: /turns [show|unlimited|COUNT]"
                 )
             )
         if tokens[0] == "set" and len(tokens) == 2:
@@ -813,11 +821,19 @@ def create_default_command_registry() -> CommandRegistry:
         elif len(tokens) == 1:
             raw = tokens[0]
         else:
-            return CommandResult(message="Usage: /turns [show|COUNT]")
+            return CommandResult(message="Usage: /turns [show|unlimited|COUNT]")
+        if raw.lower() == "unlimited":
+            context.engine.set_max_turns(None)
+            return CommandResult(
+                message=(
+                    "Max turns set to unlimited for this session. "
+                    f"Saved config remains {settings.max_turns}."
+                )
+            )
         try:
             turns = int(raw)
         except ValueError:
-            return CommandResult(message="Usage: /turns [show|COUNT]")
+            return CommandResult(message="Usage: /turns [show|unlimited|COUNT]")
         turns = max(1, min(turns, 512))
         settings.max_turns = turns
         save_settings(settings)
@@ -987,15 +1003,20 @@ def create_default_command_registry() -> CommandRegistry:
                     f"Denied tools: {permission.denied_tools}"
                 )
             )
+        target_mode: str | None = None
         if tokens[0] == "set" and len(tokens) == 2:
-            settings.permission.mode = PermissionMode(tokens[1])
+            target_mode = tokens[1]
+        elif len(tokens) == 1 and tokens[0] in _MODE_LABELS:
+            target_mode = tokens[0]
+        if target_mode is not None:
+            settings.permission.mode = PermissionMode(target_mode)
             save_settings(settings)
             context.engine.set_permission_checker(PermissionChecker(settings.permission))
             if context.app_state is not None:
                 context.app_state.set(permission_mode=settings.permission.mode.value)
-            label = _MODE_LABELS.get(tokens[1], tokens[1])
-            return CommandResult(message=f"Permission mode set to {label}")
-        return CommandResult(message="Usage: /permissions [show|set MODE]")
+            label = _MODE_LABELS.get(target_mode, target_mode)
+            return CommandResult(message=f"Permission mode set to {label}", refresh_runtime=True)
+        return CommandResult(message="Usage: /permissions [show|MODE]")
 
     async def _plan_handler(args: str, context: CommandContext) -> CommandResult:
         settings = load_settings()
@@ -1006,29 +1027,87 @@ def create_default_command_registry() -> CommandRegistry:
             context.engine.set_permission_checker(PermissionChecker(settings.permission))
             if context.app_state is not None:
                 context.app_state.set(permission_mode=settings.permission.mode.value)
-            return CommandResult(message="Plan mode enabled.")
+            return CommandResult(message="Plan mode enabled.", refresh_runtime=True)
         if mode in {"off", "exit"}:
             settings.permission.mode = PermissionMode.DEFAULT
             save_settings(settings)
             context.engine.set_permission_checker(PermissionChecker(settings.permission))
             if context.app_state is not None:
                 context.app_state.set(permission_mode=settings.permission.mode.value)
-            return CommandResult(message="Plan mode disabled.")
+            return CommandResult(message="Plan mode disabled.", refresh_runtime=True)
         return CommandResult(message="Usage: /plan [on|off]")
 
     async def _model_handler(args: str, context: CommandContext) -> CommandResult:
         settings = load_settings()
+        manager = AuthManager(settings)
+        active_profile = manager.get_active_profile()
+        _, profile = settings.resolve_profile(active_profile)
         tokens = args.split(maxsplit=1)
         if not tokens or tokens[0] == "show":
-            return CommandResult(message=f"Model: {settings.model}")
+            return CommandResult(message=f"Model: {display_model_setting(profile)}\nProfile: {active_profile}")
         if tokens[0] == "set" and len(tokens) == 2:
-            settings.model = tokens[1]
-            save_settings(settings)
-            context.engine.set_model(tokens[1])
+            model_name = tokens[1].strip()
+        elif args.strip():
+            model_name = args.strip()
+        else:
+            model_name = None
+        if model_name:
+            if model_name.lower() == "default":
+                manager.update_profile(active_profile, last_model="")
+                message = "Model reset to default."
+            else:
+                manager.update_profile(active_profile, last_model=model_name)
+                message = f"Model set to {model_name}."
+            updated = load_settings()
+            context.engine.set_model(updated.model)
             if context.app_state is not None:
-                context.app_state.set(model=tokens[1])
-            return CommandResult(message=f"Model set to {tokens[1]}. Restart session to use it.")
-        return CommandResult(message="Usage: /model [show|set MODEL]")
+                updated_profile = updated.resolve_profile()[1]
+                context.app_state.set(model=display_model_setting(updated_profile))
+            return CommandResult(message=message, refresh_runtime=True)
+        return CommandResult(message="Usage: /model [show|MODEL]")
+
+    async def _provider_handler(args: str, context: CommandContext) -> CommandResult:
+        manager = AuthManager()
+        profiles = manager.get_profile_statuses()
+        tokens = args.split()
+        if not tokens or tokens[0] == "show":
+            active_name = manager.get_active_profile()
+            active = profiles[active_name]
+            lines = [
+                f"Active profile: {active_name}",
+                f"Label: {active['label']}",
+                f"Provider: {active['provider']}",
+                f"Auth source: {active['auth_source']}",
+                f"Configured: {'yes' if active['configured'] else 'no'}",
+                f"Base URL: {active['base_url'] or '(default)'}",
+                f"Model: {active['model']}",
+            ]
+            return CommandResult(message="\n".join(lines))
+        if tokens[0] == "list":
+            lines = ["Provider profiles:"]
+            for name, info in profiles.items():
+                marker = "*" if info["active"] else " "
+                configured = "configured" if info["configured"] else "missing auth"
+                lines.append(f"{marker} {name} [{configured}] {info['label']} -> {info['model']}")
+            return CommandResult(message="\n".join(lines))
+        target = tokens[1] if tokens[0] == "use" and len(tokens) == 2 else (tokens[0] if len(tokens) == 1 else None)
+        if target is None:
+            return CommandResult(message="Usage: /provider [show|list|PROFILE]")
+        manager.use_profile(target)
+        updated = load_settings()
+        profile = updated.resolve_profile()[1]
+        context.engine.set_model(updated.model)
+        if context.app_state is not None:
+            context.app_state.set(
+                model=display_model_setting(profile),
+                provider=detect_provider(updated).name,
+                auth_status=auth_status(updated),
+                base_url=updated.base_url or "",
+            )
+        return CommandResult(
+            message=f"Switched provider profile to {target} ({profile.label}).",
+            refresh_runtime=True,
+        )
 
     async def _theme_handler(args: str, context: CommandContext) -> CommandResult:
         from openharness.themes import list_themes, load_theme
@@ -1069,6 +1148,11 @@ def create_default_command_registry() -> CommandRegistry:
 
         if tokens[0] == "set" and len(tokens) == 2:
             name = tokens[1]
+        elif len(tokens) == 1 and tokens[0] not in {"list", "preview"}:
+            name = tokens[0]
+        else:
+            name = None
+        if name is not None:
             try:
                 load_theme(name)
             except KeyError:
@@ -1107,7 +1191,7 @@ def create_default_command_registry() -> CommandRegistry:
             ]
             return CommandResult(message="\n".join(lines))
 
-        return CommandResult(message="Usage: /theme [list|show|set NAME|preview NAME]")
+        return CommandResult(message="Usage: /theme [list|show|NAME|preview NAME]")
 
     async def _output_style_handler(args: str, context: CommandContext) -> CommandResult:
         settings = load_settings()
@@ -1126,14 +1210,20 @@ def create_default_command_registry() -> CommandRegistry:
                 message="\n".join(f"{style.name} [{style.source}]" for style in styles)
             )
         if tokens[0] == "set" and len(tokens) == 2:
-            if tokens[1] not in available:
-                return CommandResult(message=f"Unknown output style: {tokens[1]}")
-            settings.output_style = tokens[1]
+            style_name = tokens[1]
+        elif len(tokens) == 1 and tokens[0] not in {"list"}:
+            style_name = tokens[0]
+        else:
+            style_name = None
+        if style_name is not None:
+            if style_name not in available:
+                return CommandResult(message=f"Unknown output style: {style_name}")
+            settings.output_style = style_name
             save_settings(settings)
             if context.app_state is not None:
-                context.app_state.set(output_style=tokens[1])
-            return CommandResult(message=f"Output style set to {tokens[1]}")
-        return CommandResult(message="Usage: /output-style [show|list|set NAME]")
+                context.app_state.set(output_style=style_name)
+            return CommandResult(message=f"Output style set to {style_name}")
+        return CommandResult(message="Usage: /output-style [show|list|NAME]")
 
     async def _keybindings_handler(_: str, context: CommandContext) -> CommandResult:
         from openharness.keybindings import get_keybindings_path, load_keybindings
@@ -1204,12 +1294,17 @@ def create_default_command_registry() -> CommandRegistry:
 
     async def _doctor_handler(_: str, context: CommandContext) -> CommandResult:
         settings = load_settings()
+        manager = AuthManager(settings)
+        active_profile_name, active_profile = settings.resolve_profile()
         memory_dir = get_project_memory_dir(context.cwd)
         state = context.app_state.get() if context.app_state is not None else None
         lines = [
             "Doctor summary:",
             f"- cwd: {context.cwd}",
+            f"- active_profile: {active_profile_name}",
             f"- model: {settings.model}",
+            f"- provider_workflow: {active_profile.label}",
+            f"- auth_source: {active_profile.auth_source}",
             f"- permission_mode: {state.permission_mode if state is not None else settings.permission.mode}",
             f"- theme: {state.theme if state is not None else settings.theme}",
             f"- output_style: {state.output_style if state is not None else settings.output_style}",
@@ -1220,6 +1315,7 @@ def create_default_command_registry() -> CommandRegistry:
             f"- memory_dir: {memory_dir}",
             f"- plugin_count: {max(len(context.plugin_summary.splitlines()) - 1, 0) if context.plugin_summary else 0}",
             f"- mcp_configured: {'yes' if context.mcp_summary and 'No MCP' not in context.mcp_summary else 'no'}",
+            f"- auth_configured: {'yes' if manager.get_profile_statuses()[active_profile_name]['configured'] else 'no'}",
         ]
         return CommandResult(message="\n".join(lines))
 
@@ -1418,6 +1514,7 @@ def create_default_command_registry() -> CommandRegistry:
     registry.register(SlashCommand("passes", "Show or update reasoning pass count", _passes_handler))
     registry.register(SlashCommand("turns", "Show or update maximum agentic turn count", _turns_handler))
     registry.register(SlashCommand("continue", "Continue the previous tool loop if it was interrupted", _continue_handler))
+    registry.register(SlashCommand("provider", "Show or switch provider profiles", _provider_handler))
     registry.register(SlashCommand("model", "Show or update the default model", _model_handler))
     registry.register(SlashCommand("theme", "List, set, show or preview TUI themes", _theme_handler))
     registry.register(SlashCommand("output-style", "Show or update output style", _output_style_handler))
