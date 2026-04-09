@@ -205,8 +205,31 @@ The script will:
 ### Prerequisites
 
 - **Python 3.10+** and [uv](https://docs.astral.sh/uv/)
-- **Node.js 18+** (optional, for the React terminal UI)
+- **Node.js 18+** (optional, for the React terminal UI or web frontend)
 - An LLM API key
+
+### Frontend Options
+
+OpenHarness supports two frontend interfaces:
+
+1. **Terminal UI (TUI)** - Default React-based terminal interface
+   ```bash
+   oh  # Launches terminal UI
+   ```
+
+2. **Web UI** - Modern browser-based interface
+   ```bash
+   # Install web frontend
+   bash scripts/install-web.sh    # Unix/Mac
+   scripts\install-web.bat        # Windows
+   
+   # Launch web server
+   oh web
+   
+   # Open http://localhost:8080 in your browser
+   ```
+
+See [docs/WEB_FRONTEND_QUICKSTART.md](docs/WEB_FRONTEND_QUICKSTART.md) for web frontend details.
 
 ### One-Command Demo
 
