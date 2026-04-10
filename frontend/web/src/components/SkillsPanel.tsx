@@ -72,9 +72,12 @@ export function SkillsPanel() {
           </div>
         ) : (
           skills.map(skill => (
-            <div key={skill.id} className={styles.skillCard}>
+            <div 
+              key={skill.id} 
+              className={`${styles.skillCard} ${skill.enabled ? styles.enabled : styles.disabled}`}
+            >
               <div className={styles.skillHeader}>
-                <div className={styles.skillIcon}>
+                <div className={`${styles.skillIcon} ${skill.enabled ? styles.enabled : ''}`}>
                   <Sparkles size={18} />
                 </div>
                 <div className={styles.skillInfo}>
@@ -84,17 +87,19 @@ export function SkillsPanel() {
                 <button
                   className={styles.toggleButton}
                   onClick={() => toggleSkill(skill.id)}
+                  title={skill.enabled ? 'Disable skill' : 'Enable skill'}
                 >
                   {skill.enabled ? <ToggleRight size={24} /> : <ToggleLeft size={24} />}
                 </button>
               </div>
               <div className={styles.skillStatus}>
                 <span className={`${styles.statusBadge} ${skill.enabled ? styles.enabled : styles.disabled}`}>
-                  {skill.enabled ? 'Active' : 'Inactive'}
+                  {skill.enabled ? '✓ Active' : '○ Inactive'}
                 </span>
                 <button
                   className={styles.deleteButton}
                   onClick={() => removeSkill(skill.id)}
+                  title="Remove skill"
                 >
                   <Trash2 size={14} />
                 </button>

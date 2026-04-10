@@ -3,7 +3,6 @@ import {
   Puzzle, 
   Users, 
   FileCheck, 
-  Settings, 
   X,
   ChevronRight,
   MessageSquare,
@@ -77,7 +76,6 @@ export function Sidebar() {
     { id: 'todo', label: 'TODO', icon: FileCheck, path: '/todo' },
     { id: 'channels', label: 'Channels', icon: Radio, path: '/channels', count: channels.filter(c => c.enabled).length },
     { id: 'config', label: 'OpenHarness Config', icon: Sliders, path: '/config' },
-    { id: 'settings', label: 'Settings', icon: Settings, path: '/settings' },
   ];
 
   if (!sidebarOpen) {

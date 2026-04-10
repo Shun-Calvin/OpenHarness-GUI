@@ -13,7 +13,9 @@ import type {
   TodoItem,
   AppSettings,
   ChannelConfig,
-  OpenHarnessConfig
+  OpenHarnessConfig,
+  ModalRequest,
+  PermissionModalRequest,
 } from '../types';
 
 interface Skill {
@@ -48,6 +50,9 @@ interface AppState {
   todoMarkdown: string;
   commands: string[];
   
+  // Modal state for permission requests
+  activeModal: ModalRequest | null;
+  
   // New features state
   chatSessions: ChatSession[];
   currentChatId: string | null;
@@ -81,6 +86,7 @@ interface AppState {
   
   // Callback actions (set by hooks)
   submitPrompt: ((prompt: string) => void) | null;
+  sendPermissionResponse: ((requestId: string, allowed: boolean) => void) | null;
   
   // Actions
   setConnected: (connected: boolean) => void;
@@ -98,12 +104,17 @@ interface AppState {
   setCommands: (commands: string[]) => void;
   setBusy: (busy: boolean) => void;
   setSubmitPrompt: (fn: ((prompt: string) => void) | null) => void;
+  setSendPermissionResponse: (fn: ((requestId: string, allowed: boolean) => void) | null) => void;
   toggleSidebar: () => void;
   setActivePanel: (panel: AppState['activePanel']) => void;
   setTerminalView: (view: AppState['terminalView']) => void;
   toggleCommandPalette: () => void;
   setCommandPaletteOpen: (open: boolean) => void;
   clearMessages: () => void;
+  
+  // Modal actions
+  setActiveModal: (modal: ModalRequest | null) => void;
+  respondToModal: (requestId: string, response: boolean | string) => void;
   
   // New feature actions
   setInputHeight: (height: number) => void;
@@ -199,6 +210,7 @@ const STORAGE_KEYS = {
   SKILLS: 'openharness-skills',
   MEMORIES: 'openharness-memories',
   CHANNELS: 'openharness-channels',
+  AVAILABLE_MODELS: 'openharness-available-models',
 };
 
 // Helper to load from localStorage
@@ -246,6 +258,8 @@ export const useAppStore = create<AppState>((set) => ({
   inputHeight: 140,
   showFileUpload: false,
   submitPrompt: null,
+  sendPermissionResponse: null,
+  activeModal: null,
   expandedMessages: new Set(),
   isResizingSidebar: false,
   isResizingInput: false,
@@ -254,7 +268,7 @@ export const useAppStore = create<AppState>((set) => ({
   chatSessions: loadFromStorage<ChatSession[]>(STORAGE_KEYS.CHAT_SESSIONS, []),
   currentChatId: loadFromStorage<string | null>(STORAGE_KEYS.CURRENT_CHAT_ID, null),
   uploadedFiles: [],
-  availableModels: DEFAULT_MODELS,
+  availableModels: loadFromStorage<string[]>(STORAGE_KEYS.AVAILABLE_MODELS, DEFAULT_MODELS),
   permissionModes: PERMISSION_MODES,
   settings: loadFromStorage<AppSettings>(STORAGE_KEYS.SETTINGS, DEFAULT_SETTINGS),
   mcpServerConfigs: [],
@@ -292,6 +306,7 @@ export const useAppStore = create<AppState>((set) => ({
   setCommands: (commands) => set({ commands }),
   setBusy: (busy) => set({ isBusy: busy }),
   setSubmitPrompt: (fn) => set({ submitPrompt: fn }),
+  setSendPermissionResponse: (fn) => set({ sendPermissionResponse: fn }),
   
   toggleSidebar: () => set((state) => ({ sidebarOpen: !state.sidebarOpen })),
   setActivePanel: (panel) => set({ activePanel: panel }),
@@ -300,6 +315,16 @@ export const useAppStore = create<AppState>((set) => ({
   toggleCommandPalette: () => set((state) => ({ commandPaletteOpen: !state.commandPaletteOpen })),
   setCommandPaletteOpen: (open) => set({ commandPaletteOpen: open }),
   clearMessages: () => set({ messages: [] }),
+  
+  // Modal actions
+  setActiveModal: (modal) => set({ activeModal: modal }),
+  respondToModal: (requestId, _response) => set((state) => {
+    // Clear the modal when responding
+    if (state.activeModal && (state.activeModal as PermissionModalRequest).request_id === requestId) {
+      return { activeModal: null };
+    }
+    return state;
+  }),
   
   // New feature actions
   setInputHeight: (height) => set({ inputHeight: height }),
@@ -316,7 +341,11 @@ export const useAppStore = create<AppState>((set) => ({
   
   setShowFileUpload: (show) => set({ showFileUpload: show }),
   
-  setAvailableModels: (models) => set({ availableModels: models }),
+  setAvailableModels: (models) => {
+    saveToStorage(STORAGE_KEYS.AVAILABLE_MODELS, models);
+    console.log('[useAppStore] Saved available models:', models);
+    set({ availableModels: models });
+  },
   
   setCurrentModel: (model) => set((state) => {
     const newSettings = { ...state.settings, model };

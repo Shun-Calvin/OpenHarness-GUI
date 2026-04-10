@@ -44,12 +44,28 @@ export interface BridgeSessionSnapshot {
   status: string;
 }
 
+// Permission Modal Types
+export interface PermissionModalRequest {
+  kind: 'permission';
+  request_id: string;
+  tool_name: string;
+  reason: string;
+}
+
+export interface QuestionModalRequest {
+  kind: 'question';
+  request_id: string;
+  question: string;
+}
+
+export type ModalRequest = PermissionModalRequest | QuestionModalRequest;
+
 export interface BackendEvent {
   type: 'ready' | 'state_snapshot' | 'tasks_snapshot' | 'transcript_item' | 
         'assistant_delta' | 'assistant_complete' | 'line_complete' | 
         'modal_request' | 'select_request' | 'error' | 'mcp_servers' | 
         'bridge_sessions' | 'todo_updated' | 'swarm_teammates' | 
-        'swarm_notifications' | 'token_usage';
+        'swarm_notifications' | 'token_usage' | 'state_update';
   state?: Record<string, unknown>;
   tasks?: TaskSnapshot[];
   item?: TranscriptItem;
@@ -57,7 +73,7 @@ export interface BackendEvent {
   commands?: string[];
   mcp_servers?: McpServerSnapshot[];
   bridge_sessions?: BridgeSessionSnapshot[];
-  modal?: Record<string, unknown>;
+  modal?: ModalRequest;
   select_request?: {
     title: string;
     command: string;
@@ -72,6 +88,8 @@ export interface BackendEvent {
   };
   message_id?: string;
   response_time?: number;
+  // Permission mode update
+  permission_mode?: string;
 }
 
 export interface TranscriptItem {

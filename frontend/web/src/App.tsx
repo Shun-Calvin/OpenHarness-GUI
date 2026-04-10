@@ -3,6 +3,7 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { Header } from './components/Header';
 import { Sidebar } from './components/Sidebar';
 import { CommandPalette } from './components/CommandPalette';
+import { PermissionModal } from './components/PermissionModal';
 import { useBackendConnection } from './hooks/useBackendConnection';
 import { useAppStore } from './store/useAppStore';
 import { ChatsPage } from './pages/ChatsPage';
@@ -12,7 +13,6 @@ import { SwarmPage } from './pages/SwarmPage';
 import { SkillsPage } from './pages/SkillsPage';
 import { MemoryPage } from './pages/MemoryPage';
 import { TodoPage } from './pages/TodoPage';
-import { SettingsPage } from './pages/SettingsPage';
 import { ChannelsPage } from './pages/ChannelsPage';
 import { OpenHarnessConfigPage } from './pages/OpenHarnessConfigPage';
 import styles from './styles/App.module.css';
@@ -36,14 +36,14 @@ export function App() {
     localStorage.setItem('openharness-theme', settings.theme);
   }, [settings.theme]);
 
-  React.useEffect(() => {
-    connect();
-  }, [connect]);
+  // Connection is managed by the hook's singleton pattern
+  // No need to call connect() here - it auto-connects on first hook usage
 
   return (
     <BrowserRouter>
       <div className={styles.app}>
         <CommandPalette />
+        <PermissionModal />
         <Header />
         <div className={styles.main}>
           <Sidebar />
@@ -75,7 +75,6 @@ export function App() {
                 <Route path="/todo" element={<TodoPage />} />
                 <Route path="/channels" element={<ChannelsPage />} />
                 <Route path="/config" element={<OpenHarnessConfigPage />} />
-                <Route path="/settings" element={<SettingsPage />} />
               </Routes>
             )}
           </main>

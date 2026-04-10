@@ -1,7 +1,13 @@
 import type { Socket } from 'socket.io-client';
+import { io } from 'socket.io-client';
 
 // Global socket reference for use outside of React components
 let socketInstance: Socket | null = null;
+let connectionAttempted = false;
+let connectionListeners: Array<{
+  event: string;
+  handler: (...args: unknown[]) => void;
+}> = [];
 
 export function setSocketInstance(socket: Socket | null) {
   socketInstance = socket;
@@ -9,6 +15,72 @@ export function setSocketInstance(socket: Socket | null) {
 
 export function getSocketInstance(): Socket | null {
   return socketInstance;
+}
+
+export function isConnectionAttempted(): boolean {
+  return connectionAttempted;
+}
+
+export function setConnectionAttempted(attempted: boolean) {
+  connectionAttempted = attempted;
+}
+
+export function createSocket(connectionUrl: string): Socket {
+  const socket = io(connectionUrl, {
+    transports: ['websocket', 'polling'],
+    reconnection: true,
+    reconnectionDelay: 1000,
+    reconnectionAttempts: 5,
+    path: '/socket.io',
+  });
+  socketInstance = socket;
+  connectionAttempted = true;
+  return socket;
+}
+
+export function disconnectSocket(): void {
+  if (socketInstance) {
+    socketInstance.disconnect();
+    socketInstance = null;
+  }
+  connectionAttempted = false;
+  connectionListeners = [];
+}
+
+export function addSocketListener(event: string, handler: (...args: unknown[]) => void): void {
+  if (socketInstance) {
+    socketInstance.on(event, handler);
+    connectionListeners.push({ event, handler });
+  }
+}
+
+export function removeSocketListener(event: string, handler?: (...args: unknown[]) => void): void {
+  if (socketInstance) {
+    if (handler) {
+      socketInstance.off(event, handler);
+      connectionListeners = connectionListeners.filter(
+        l => l.event !== event || l.handler !== handler
+      );
+    } else {
+      socketInstance.off(event);
+      connectionListeners = connectionListeners.filter(l => l.event !== event);
+    }
+  }
+}
+
+export function removeAllSocketListeners(): void {
+  if (socketInstance) {
+    for (const { event, handler } of connectionListeners) {
+      socketInstance.off(event, handler);
+    }
+    connectionListeners = [];
+  }
+}
+
+export function emitSocketEvent(event: string, data: unknown): void {
+  if (socketInstance?.connected) {
+    socketInstance.emit(event, data);
+  }
 }
 
 export function sendToBackend(type: string, data: Record<string, unknown>): boolean {

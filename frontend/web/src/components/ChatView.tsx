@@ -1,5 +1,7 @@
 import React, { useRef, useEffect } from 'react';
 import { Send, Bot, User, AlertCircle, Wrench, Paperclip, Maximize2, Minimize2, ChevronDown, ChevronUp, Sparkles, Brain, Plus } from 'lucide-react';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import { useAppStore } from '../store/useAppStore';
 import { FileUpload } from './FileUpload';
 import { ModelSelector } from './ModelSelector';
@@ -244,7 +246,72 @@ export function ChatView() {
                         {JSON.stringify(message.tool_input, null, 2)}
                       </pre>
                     )}
-                    <div className={styles.text}>{message.content}</div>
+                    <div className={styles.text}>
+                      {message.role === 'assistant' || message.role === 'user' ? (
+                        <ReactMarkdown 
+                          remarkPlugins={[remarkGfm]}
+                          components={{
+                            code({ className, children }) {
+                              const match = /language-(\w+)/.exec(className || '');
+                              const isInline = !match;
+                              return !isInline ? (
+                                <pre className={`${className} ${styles.codeBlock}`}>
+                                  <code>{String(children).replace(/\n$/, '')}</code>
+                                </pre>
+                              ) : (
+                                <code className={styles.inlineCode}>{String(children)}</code>
+                              );
+                            },
+                            pre({ children }) {
+                              return <pre className={styles.markdownPre}>{children}</pre>;
+                            },
+                            blockquote({ children }) {
+                              return <blockquote className={styles.blockquote}>{children}</blockquote>;
+                            },
+                            ul({ children }) {
+                              return <ul className={styles.unorderedList}>{children}</ul>;
+                            },
+                            ol({ children }) {
+                              return <ol className={styles.orderedList}>{children}</ol>;
+                            },
+                            li({ children }) {
+                              return <li className={styles.listItem}>{children}</li>;
+                            },
+                            h1({ children }) {
+                              return <h1 className={styles.heading1}>{children}</h1>;
+                            },
+                            h2({ children }) {
+                              return <h2 className={styles.heading2}>{children}</h2>;
+                            },
+                            h3({ children }) {
+                              return <h3 className={styles.heading3}>{children}</h3>;
+                            },
+                            p({ children }) {
+                              return <p className={styles.paragraph}>{children}</p>;
+                            },
+                            strong({ children }) {
+                              return <strong className={styles.strong}>{children}</strong>;
+                            },
+                            em({ children }) {
+                              return <em className={styles.em}>{children}</em>;
+                            },
+                            table({ children }) {
+                              return <div className={styles.tableWrapper}><table className={styles.table}>{children}</table></div>;
+                            },
+                            th({ children }) {
+                              return <th className={styles.tableHeader}>{children}</th>;
+                            },
+                            td({ children }) {
+                              return <td className={styles.tableCell}>{children}</td>;
+                            },
+                          }}
+                        >
+                          {message.content}
+                        </ReactMarkdown>
+                      ) : (
+                        <div className={styles.plainText}>{message.content}</div>
+                      )}
+                    </div>
                     {message.is_error && (
                       <div className={styles.error}>
                         <AlertCircle size={16} />

@@ -1,7 +1,7 @@
 import { ChevronDown, Check, Edit3, CheckCircle, RefreshCw } from 'lucide-react';
 import { useState, useRef, useEffect } from 'react';
 import { useAppStore } from '../store/useAppStore';
-import { sendModelChange, sendConfigUpdate } from '../utils/socketManager';
+import { sendModelChange } from '../utils/socketManager';
 import styles from '../styles/ModelSelector.module.css';
 
 // Default models if backend doesn't provide any
@@ -18,25 +18,33 @@ const DEFAULT_MODELS = [
 ];
 
 export function ModelSelector() {
-  const { settings, setCurrentModel, availableModels, sessionState, connected } = useAppStore();
+  const { settings, setCurrentModel, availableModels, sessionState, connected, setAvailableModels } = useAppStore();
   const [isOpen, setIsOpen] = useState(false);
   const [isCustomInput, setIsCustomInput] = useState(false);
   const [customModel, setCustomModel] = useState('');
   const [syncStatus, setSyncStatus] = useState<'synced' | 'pending' | 'error'>('synced');
+  const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved'>('idle');
   const selectorRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
   const currentModel = settings.model;
-  const models = availableModels.length > 0 ? availableModels : DEFAULT_MODELS;
+  // Include custom models in the list
+  const baseModels = availableModels.length > 0 ? availableModels : DEFAULT_MODELS;
+  const models = currentModel && !baseModels.includes(currentModel) 
+    ? [currentModel, ...baseModels] 
+    : baseModels;
 
   // Check if model is synced with backend
   useEffect(() => {
-    if (sessionState?.model && sessionState.model !== currentModel) {
+    if (!connected) {
+      setSyncStatus('error');
+    } else if (sessionState?.model && sessionState.model !== currentModel) {
+      // Backend has a different model - frontend needs to sync
       setSyncStatus('pending');
     } else {
       setSyncStatus('synced');
     }
-  }, [sessionState?.model, currentModel]);
+  }, [sessionState?.model, currentModel, connected]);
 
   // Close dropdown when clicking outside
   useEffect(() => {
@@ -90,20 +98,37 @@ export function ModelSelector() {
   const handleCustomSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     e.stopPropagation();
-    if (customModel.trim()) {
-      // Update local state
-      setCurrentModel(customModel.trim());
-      
-      // Send to backend
-      if (connected) {
-        const success = sendModelChange(customModel.trim());
-        setSyncStatus(success ? 'pending' : 'error');
-      }
-      
-      setCustomModel('');
-      setIsOpen(false);
-      setIsCustomInput(false);
+    
+    if (!customModel.trim()) return;
+    
+    const modelValue = customModel.trim();
+    
+    // Save to available models if not already present
+    if (!availableModels.includes(modelValue)) {
+      setSaveStatus('saving');
+      // Persist to localStorage via the store
+      setAvailableModels([...availableModels, modelValue]);
+      console.log('[ModelSelector] Saved custom model:', modelValue);
+      setTimeout(() => setSaveStatus('saved'), 300);
+      setTimeout(() => setSaveStatus('idle'), 2000);
     }
+    
+    // Update local state immediately
+    setCurrentModel(modelValue);
+    
+    // Send to backend
+    if (connected) {
+      const success = sendModelChange(modelValue);
+      console.log('[ModelSelector] Sent model to backend:', modelValue, 'success:', success);
+      setSyncStatus(success ? 'pending' : 'error');
+    } else {
+      console.warn('[ModelSelector] Not connected to backend, model change queued');
+    }
+    
+    // Clear and close
+    setCustomModel('');
+    setIsOpen(false);
+    setIsCustomInput(false);
   };
 
   const handleCustomKeyDown = (e: React.KeyboardEvent) => {
@@ -155,7 +180,14 @@ export function ModelSelector() {
           </div>
           
           {isCustomInput && (
-            <form onSubmit={handleCustomSubmit} className={styles.customInputForm}>
+            <form 
+              onSubmit={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                handleCustomSubmit(e);
+              }} 
+              className={styles.customInputForm}
+            >
               <input
                 ref={inputRef}
                 type="text"
@@ -166,11 +198,24 @@ export function ModelSelector() {
                 className={styles.customInput}
               />
               <button
-                type="submit"
-                className={styles.customSubmit}
-                disabled={!customModel.trim()}
+                type="button"
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  const event = { preventDefault: () => {}, stopPropagation: () => {} } as React.FormEvent;
+                  handleCustomSubmit(event);
+                }}
+                className={`${styles.customSubmit} ${saveStatus === 'saved' ? styles.saved : ''}`}
+                disabled={!customModel.trim() || saveStatus === 'saving'}
+                title={saveStatus === 'saved' ? 'Saved!' : 'Save and use model'}
               >
-                <CheckCircle size={16} />
+                {saveStatus === 'saving' ? (
+                  <RefreshCw size={16} className={styles.spinning} />
+                ) : saveStatus === 'saved' ? (
+                  <Check size={16} />
+                ) : (
+                  <CheckCircle size={16} />
+                )}
               </button>
             </form>
           )}

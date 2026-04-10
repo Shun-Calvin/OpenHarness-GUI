@@ -190,6 +190,14 @@
   cursor: not-allowed;
 }
 
+.customSubmit.saved {
+  background: #22c55e;
+}
+
+.customSubmit .spinning {
+  animation: spin 1s linear infinite;
+}
+
 .dropdownContent {
   max-height: 240px;
   overflow-y: auto;

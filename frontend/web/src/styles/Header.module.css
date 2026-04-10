@@ -104,6 +104,46 @@
   }
 }
 
+@keyframes pulsing {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.4;
+  }
+}
+
+/* Agent Status Badge */
+.agentStatusBadge {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-3);
+  background: rgba(95, 115, 220, 0.15);
+  border-radius: var(--radius-full);
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--primary-400);
+  border: 1px solid rgba(95, 115, 220, 0.3);
+  margin-left: var(--space-2);
+  animation: pulseBadge 1.5s ease-in-out infinite;
+}
+
+@keyframes pulseBadge {
+  0%, 100% {
+    background: rgba(95, 115, 220, 0.15);
+    border-color: rgba(95, 115, 220, 0.3);
+  }
+  50% {
+    background: rgba(95, 115, 220, 0.25);
+    border-color: rgba(95, 115, 220, 0.5);
+  }
+}
+
+.agentStatusBadge .pulsing {
+  animation: pulsing 1.5s ease-in-out infinite;
+}
+
 /* Info Pills */
 .modelInfo,
 .modeInfo {

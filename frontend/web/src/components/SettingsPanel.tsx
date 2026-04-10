@@ -1,10 +1,12 @@
 import { useState } from 'react';
 import { Settings as SettingsIcon, Key, User, Folder, Maximize, Eye, EyeOff, Save, RefreshCw } from 'lucide-react';
 import { useAppStore } from '../store/useAppStore';
+import { useBackendConnection } from '../hooks/useBackendConnection';
 import styles from '../styles/SettingsPanel.module.css';
 
 export function SettingsPanel() {
   const { settings, updateSettings, setPermissionMode, sessionState } = useAppStore();
+  const { sendConfig } = useBackendConnection();
   const [showApiKey, setShowApiKey] = useState(false);
   const [localApiKey, setLocalApiKey] = useState(settings.apiKey);
 
@@ -12,9 +14,16 @@ export function SettingsPanel() {
     updateSettings({ apiKey: localApiKey });
   };
 
+  const handlePermissionModeChange = (mode: string) => {
+    setPermissionMode(mode);
+    // Sync to backend
+    sendConfig({ permission_mode: mode });
+  };
+
   const permissionModes = [
     { value: 'default', label: 'Default', description: 'Auto-approve safe commands' },
-    { value: 'plan', label: 'Plan Mode', description: 'Review before execution' }
+    { value: 'plan', label: 'Plan Mode', description: 'Review before execution' },
+    { value: 'auto', label: 'Auto', description: 'Allow all tools automatically' }
   ];
 
   return (
@@ -69,7 +78,7 @@ export function SettingsPanel() {
               <button
                 key={mode.value}
                 className={`${styles.modeCard} ${settings.permissionMode === mode.value ? styles.active : ''}`}
-                onClick={() => setPermissionMode(mode.value)}
+                onClick={() => handlePermissionModeChange(mode.value)}
               >
                 <div className={styles.modeCardHeader}>
                   <span className={styles.modeCardTitle}>{mode.label}</span>

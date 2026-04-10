@@ -1,4 +1,5 @@
 import { useAppStore } from '../store/useAppStore';
+import { useBackendConnection } from '../hooks/useBackendConnection';
 import type { OpenHarnessConfig } from '../types';
 import { Settings, Sliders, Wrench, BookOpen, Plug, Shield, Zap, MessageSquare, Brain, ListTodo, Users, FileText, Folder, Globe } from 'lucide-react';
 import { useState, useEffect } from 'react';
@@ -74,6 +75,7 @@ const DEFAULT_CONFIG: OpenHarnessConfig = {
 
 export function OpenHarnessConfigPage() {
   const { openHarnessConfig, setOpenHarnessConfig, updateSettings } = useAppStore();
+  const { sendConfig } = useBackendConnection();
   const [localConfig, setLocalConfig] = useState<OpenHarnessConfig>(openHarnessConfig || DEFAULT_CONFIG);
   const [activeSection, setActiveSection] = useState<string>('engine');
   const [saved, setSaved] = useState(false);
@@ -94,6 +96,10 @@ export function OpenHarnessConfigPage() {
       maxTurns: localConfig.engine.maxTurns,
       permissionMode: localConfig.permissions.mode === 'auto' ? 'default' : localConfig.permissions.mode
     });
+    // Sync permission mode to backend
+    if (sendConfig) {
+      sendConfig({ permission_mode: localConfig.permissions.mode });
+    }
     setSaved(true);
     setTimeout(() => setSaved(false), 2000);
   };
