@@ -3,6 +3,7 @@ import logging
 from types import SimpleNamespace
 from datetime import datetime
 import json
+from pathlib import Path
 
 import pytest
 
@@ -15,10 +16,10 @@ from openharness.engine.stream_events import AssistantTextDelta, StatusEvent, To
 from ohmo.gateway.bridge import OhmoGatewayBridge, _format_gateway_error
 from ohmo.gateway.models import GatewayState
 from ohmo.gateway.runtime import OhmoSessionRuntimePool
-from ohmo.gateway.service import gateway_status, stop_gateway_process
+from ohmo.gateway.service import OhmoGatewayService, gateway_status, stop_gateway_process
 from ohmo.gateway.router import session_key_for_message
 from ohmo.session_storage import save_session_snapshot
-from ohmo.workspace import initialize_workspace
+from ohmo.workspace import get_gateway_restart_notice_path, initialize_workspace
 
 
 def test_gateway_router_uses_thread_when_present():
@@ -216,7 +217,7 @@ async def test_runtime_pool_stream_message_formats_auto_compact_status_for_feish
     updates = [u async for u in pool.stream_message(message, "feishu:c1")]
 
     assert updates[1].kind == "progress"
-    assert updates[1].text == "🧠 聊天有点长啦，我先帮你悄悄压缩一下记忆，马上继续～"
+    assert updates[1].text == "🧠 聊天有点长啦，我先帮你蹦蹦跳跳压缩一下记忆，马上带着重点回来～"
     assert updates[-1].kind == "final"
     assert updates[-1].text == "done"
 
@@ -386,6 +387,191 @@ async def test_gateway_bridge_logs_inbound_and_final(caplog):
     assert "ohmo inbound received" in caplog.text
     assert "ohmo outbound final" in caplog.text
     assert "please translate this" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_gateway_bridge_stop_command_cancels_current_session():
+    bus = MessageBus()
+    cancelled = asyncio.Event()
+    release = asyncio.Event()
+
+    class FakeRuntimePool:
+        async def stream_message(self, message, session_key):
+            try:
+                yield SimpleNamespace(kind="progress", text="🤔 想一想…", metadata={"_progress": True, "_session_key": session_key})
+                await release.wait()
+                yield SimpleNamespace(kind="final", text="Done", metadata={"_session_key": session_key})
+            except asyncio.CancelledError:
+                cancelled.set()
+                raise
+
+    bridge = OhmoGatewayBridge(bus=bus, runtime_pool=FakeRuntimePool())
+    task = asyncio.create_task(bridge.run())
+    try:
+        await bus.publish_inbound(
+            InboundMessage(channel="feishu", sender_id="u1", chat_id="c1", content="long task")
+        )
+        first = await asyncio.wait_for(bus.consume_outbound(), timeout=1.0)
+        assert first.metadata["_progress"] is True
+        await bus.publish_inbound(
+            InboundMessage(channel="feishu", sender_id="u1", chat_id="c1", content="/stop")
+        )
+        stopped = await asyncio.wait_for(bus.consume_outbound(), timeout=1.0)
+        await asyncio.wait_for(cancelled.wait(), timeout=1.0)
+    finally:
+        bridge.stop()
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
+
+    assert stopped.content == "⏹️ 已停止当前正在运行的任务。"
+
+
+@pytest.mark.asyncio
+async def test_gateway_bridge_restart_command_requests_gateway_restart():
+    bus = MessageBus()
+    restarted = asyncio.Event()
+    restart_payloads: list[tuple[str, str, str]] = []
+
+    class FakeRuntimePool:
+        async def stream_message(self, message, session_key):
+            if False:
+                yield
+
+    async def fake_restart(message, session_key: str) -> None:
+        restart_payloads.append((message.channel, message.chat_id, session_key))
+        restarted.set()
+
+    bridge = OhmoGatewayBridge(bus=bus, runtime_pool=FakeRuntimePool(), restart_gateway=fake_restart)
+    task = asyncio.create_task(bridge.run())
+    try:
+        await bus.publish_inbound(
+            InboundMessage(channel="feishu", sender_id="u1", chat_id="c1", content="/restart")
+        )
+        restarting = await asyncio.wait_for(bus.consume_outbound(), timeout=1.0)
+        await asyncio.wait_for(restarted.wait(), timeout=1.0)
+    finally:
+        bridge.stop()
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
+
+    assert restarting.content == (
+        "🔄 正在重启 gateway，马上回来。\n"
+        "Restarting the gateway now. I'll be back in a moment."
+    )
+    assert restart_payloads == [("feishu", "c1", "feishu:c1")]
+
+
+@pytest.mark.asyncio
+async def test_gateway_service_request_restart_waits_before_stop(monkeypatch):
+    service = object.__new__(OhmoGatewayService)
+    service._restart_requested = False
+    service._stop_event = asyncio.Event()
+    service._workspace = "/tmp/ohmo"
+
+    slept: list[float] = []
+
+    async def fake_sleep(delay: float) -> None:
+        slept.append(delay)
+
+    monkeypatch.setattr("ohmo.gateway.service.asyncio.sleep", fake_sleep)
+    monkeypatch.setattr(
+        "ohmo.gateway.service.get_gateway_restart_notice_path",
+        lambda workspace: Path("/tmp/restart-notice.json"),
+    )
+    writes: list[str] = []
+    monkeypatch.setattr(
+        "pathlib.Path.write_text",
+        lambda self, content, encoding=None: writes.append(content) or len(content),
+    )
+
+    message = InboundMessage(channel="feishu", sender_id="u1", chat_id="c1", content="/restart")
+
+    await OhmoGatewayService.request_restart(service, message, "feishu:c1")
+
+    assert service._restart_requested is True
+    assert service._stop_event.is_set() is True
+    assert slept == [0.75]
+    assert writes
+
+
+@pytest.mark.asyncio
+async def test_gateway_service_publishes_pending_restart_notice(tmp_path, monkeypatch):
+    workspace = tmp_path / ".ohmo-home"
+    initialize_workspace(workspace)
+    notice_path = get_gateway_restart_notice_path(workspace)
+    notice_path.write_text(
+        json.dumps(
+            {
+                "channel": "feishu",
+                "chat_id": "chat-1",
+                "session_key": "feishu:chat-1",
+                "content": "✅ gateway 已经重新连上，可以继续了。\nGateway is back online. We can continue.",
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    service = object.__new__(OhmoGatewayService)
+    service._workspace = workspace
+    service._bus = MessageBus()
+
+    async def fake_sleep(delay: float) -> None:
+        return None
+
+    monkeypatch.setattr("ohmo.gateway.service.asyncio.sleep", fake_sleep)
+
+    await OhmoGatewayService._publish_pending_restart_notice(service)
+
+    outbound = await asyncio.wait_for(service._bus.consume_outbound(), timeout=1.0)
+    assert outbound.content == "✅ gateway 已经重新连上，可以继续了。\nGateway is back online. We can continue."
+    assert outbound.chat_id == "chat-1"
+    assert not notice_path.exists()
+
+
+@pytest.mark.asyncio
+async def test_gateway_bridge_new_message_interrupts_same_session():
+    bus = MessageBus()
+    first_cancelled = asyncio.Event()
+    second_started = asyncio.Event()
+
+    class FakeRuntimePool:
+        async def stream_message(self, message, session_key):
+            if message.content == "first":
+                try:
+                    yield SimpleNamespace(kind="progress", text="🤔 想一想…", metadata={"_progress": True, "_session_key": session_key})
+                    await asyncio.Event().wait()
+                except asyncio.CancelledError:
+                    first_cancelled.set()
+                    raise
+            else:
+                second_started.set()
+                yield SimpleNamespace(kind="final", text="second-done", metadata={"_session_key": session_key})
+
+    bridge = OhmoGatewayBridge(bus=bus, runtime_pool=FakeRuntimePool())
+    task = asyncio.create_task(bridge.run())
+    try:
+        await bus.publish_inbound(
+            InboundMessage(channel="feishu", sender_id="u1", chat_id="c1", content="first")
+        )
+        await asyncio.wait_for(bus.consume_outbound(), timeout=1.0)
+        await bus.publish_inbound(
+            InboundMessage(channel="feishu", sender_id="u1", chat_id="c1", content="second")
+        )
+        interrupted = await asyncio.wait_for(bus.consume_outbound(), timeout=1.0)
+        final = await asyncio.wait_for(bus.consume_outbound(), timeout=1.0)
+        await asyncio.wait_for(first_cancelled.wait(), timeout=1.0)
+        await asyncio.wait_for(second_started.wait(), timeout=1.0)
+    finally:
+        bridge.stop()
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
+
+    assert interrupted.content == "⏹️ 已停止上一条正在处理的任务，继续看你的最新消息。"
+    assert final.content == "second-done"
 
 
 @pytest.mark.asyncio
