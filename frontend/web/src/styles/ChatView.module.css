@@ -57,37 +57,59 @@
   flex: 1;
   overflow-y: auto;
   padding: 0;
-  padding-right: 70px; /* Reserve space for timeline */
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
   position: relative;
 }
 
-/* Timeline Scrollbar - Fixed sidebar style, doesn't block content */
+/* Content wrapper for messages to allow timeline on right */
+.messagesContent {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0; /* Prevent overflow */
+}
+
+/* Timeline Sidebar - Sticky position so it stays visible while scrolling */
 .timelineBar {
-  position: absolute;
+  position: sticky;
   right: 0;
   top: 0;
-  bottom: 0;
-  width: 70px;
+  width: 60px;
+  min-height: 100vh;
+  height: 100%;
   background: var(--bg-secondary);
   border-left: 1px solid var(--border-subtle);
-  z-index: 5;
+  z-index: 10;
   pointer-events: auto;
   display: flex;
   flex-direction: column;
   flex-shrink: 0;
+  overflow: hidden;
+  transition: width 0.2s ease;
+  align-self: flex-end;
+}
+
+.timelineBar:hover {
+  width: 140px;
 }
 
 .timelineHeader {
-  padding: var(--space-2);
+  padding: var(--space-2) var(--space-2);
   font-size: 0.625rem;
   color: var(--text-tertiary);
   text-transform: uppercase;
   letter-spacing: 0.05em;
   border-bottom: 1px solid var(--border-subtle);
   flex-shrink: 0;
-  pointer-events: none;
+  background: var(--bg-tertiary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.timelineHeader svg {
+  margin-right: var(--space-1);
 }
 
 .timelineTrack {
@@ -96,6 +118,25 @@
   overflow-y: auto;
   overflow-x: hidden;
   pointer-events: auto;
+  padding: var(--space-2) 0;
+}
+
+/* Custom scrollbar for timeline */
+.timelineTrack::-webkit-scrollbar {
+  width: 4px;
+}
+
+.timelineTrack::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.timelineTrack::-webkit-scrollbar-thumb {
+  background: var(--border-subtle);
+  border-radius: 2px;
+}
+
+.timelineTrack::-webkit-scrollbar-thumb:hover {
+  background: var(--primary-500);
 }
 
 .timelineViewport {
@@ -125,6 +166,11 @@
   cursor: pointer;
   transition: var(--transition-fast);
   white-space: nowrap;
+  overflow: hidden;
+}
+
+.timelineBar:hover .timelineMarker {
+  padding: var(--space-1) var(--space-3);
 }
 
 .timelineMarker:hover {
@@ -132,23 +178,56 @@
   color: var(--primary-500);
   border-color: var(--primary-500);
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+  transform: scale(1.02);
 }
 
 .timelineMarker svg {
   flex-shrink: 0;
 }
 
-.timelineMarker:hover {
-  background: var(--bg-elevated);
-  color: var(--primary-500);
-  border-color: var(--primary-500);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+.markerDot {
+  width: 8px;
+  height: 8px;
+  background: var(--primary-500);
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.timelineBar:hover .markerDot {
+  width: 10px;
+  height: 10px;
+}
+
+.timelineMarker:hover .markerDot {
+  background: var(--primary-400);
 }
 
 .timelineLabel {
   font-weight: 500;
   overflow: hidden;
   text-overflow: ellipsis;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+
+.timelineBar:hover .timelineLabel {
+  opacity: 1;
+}
+
+/* Timeline drag handle */
+.timelineDragHandle {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 4px;
+  background: var(--border-subtle);
+  cursor: ew-resize;
+  transition: background 0.2s ease;
+}
+
+.timelineDragHandle:hover {
+  background: var(--primary-500);
 }
 
 /* Welcome Screen - Gemini Style */
@@ -298,6 +377,15 @@
 
 .message.assistant {
   background: transparent;
+}
+
+.message.system {
+  background: var(--bg-tertiary);
+}
+
+.message.tool,
+.message.tool_result {
+  background: var(--bg-tertiary);
 }
 
 .messageHeader {
@@ -678,7 +766,8 @@
   border-top: 1px solid var(--border-subtle);
   position: relative;
   transition: height var(--transition-slow);
-  overflow: visible; /* Allow model selector dropdown to show */
+  overflow: visible; /* Allow model selector and slash command dropdowns to show */
+  z-index: 20; /* Above timeline */
 }
 
 .resizeHandle {
@@ -811,6 +900,7 @@
   padding: var(--space-4);
   transition: var(--transition-base);
   position: relative;
+  overflow: visible; /* Allow slash command dropdown to show above */
 }
 
 .inputWrapper:focus-within {

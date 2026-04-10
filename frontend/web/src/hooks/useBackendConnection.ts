@@ -186,6 +186,22 @@ export function useBackendConnection() {
           setError(event.message || 'Unknown error');
           break;
 
+        case 'system':
+          // Handle system messages from slash commands
+          if (event.message) {
+            const now = Date.now();
+            const systemMessage: Message = {
+              id: crypto.randomUUID(),
+              role: 'system',
+              content: event.message,
+              timestamp: now,
+            };
+            addMessage(systemMessage);
+            // Mark as not busy after system message (command completed)
+            setBusy(false);
+          }
+          break;
+
         case 'state_snapshot':
         case 'state_update':
           if (event.state) {

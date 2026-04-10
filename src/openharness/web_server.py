@@ -370,11 +370,28 @@ class WebBackendHost:
                     render_event=render_event,
                     clear_output=clear_output,
                 )
+                # Broadcast updated state after handling line (especially for slash commands)
+                if self.runtime_bundle and self.runtime_bundle.app_state:
+                    state = self.runtime_bundle.app_state.get()
+                    await self.broadcast_with_sio(sio, {
+                        'type': 'state_snapshot',
+                        'state': {
+                            'model': state.model,
+                            'permission_mode': state.permission_mode,
+                            'working_directory': state.cwd,
+                            'effort': state.effort,
+                            'passes': state.passes,
+                        }
+                    })
             except Exception as e:
                 logger.exception("Error handling line")
                 await self.broadcast_with_sio(sio, {
                     'type': 'error',
                     'message': str(e)
+                })
+                # Reset busy state on error
+                await self.broadcast_with_sio(sio, {
+                    'type': 'line_complete'
                 })
         
         if request_type == 'clear_conversation':
@@ -406,6 +423,16 @@ sio = socketio.AsyncServer(async_mode='asgi', cors_allowed_origins='*', path='/s
 
 # Set the sio on the backend_host
 backend_host.set_sio(sio)
+
+# Global build state tracking for auto-build feature
+_frontend_build_state: dict[str, any] = {
+    'status': 'idle',  # 'idle', 'building', 'success', 'error'
+    'message': '',
+    'log': '',
+    'frontend_dir': None,
+    'build_task': None,
+    'lock': None,  # Will be set during app creation
+}
 
 
 def create_app(
@@ -876,6 +903,97 @@ def create_app(
             return {"status": "accepted"}
         return {"status": "error", "message": "Runtime not ready"}
     
+    # Initialize build state lock
+    _frontend_build_state['lock'] = asyncio.Lock()
+    _frontend_build_state['frontend_dir'] = frontend_dir
+
+    async def _do_frontend_build():
+        """Execute frontend build in background."""
+        import subprocess
+        import shutil
+        
+        build_dir = _frontend_build_state['frontend_dir']
+        if not build_dir or not build_dir.exists():
+            _frontend_build_state['status'] = 'error'
+            _frontend_build_state['message'] = 'Frontend source not found'
+            return
+        
+        async with _frontend_build_state['lock']:
+            if _frontend_build_state['status'] == 'building':
+                return  # Already building
+            
+            _frontend_build_state['status'] = 'building'
+            _frontend_build_state['message'] = 'Starting build...'
+            _frontend_build_state['log'] = ''
+            
+            try:
+                npm = shutil.which("npm") or "npm"
+                
+                # Check if node_modules exists, install if needed
+                if not (build_dir / "node_modules").exists():
+                    _frontend_build_state['message'] = 'Installing dependencies...'
+                    logger.info("Installing frontend dependencies...")
+                    install_result = subprocess.run(
+                        [npm, "install", "--no-fund", "--no-audit"],
+                        cwd=str(build_dir),
+                        capture_output=True,
+                        encoding='utf-8',
+                        errors='replace',
+                        timeout=300,
+                    )
+                    if install_result.returncode != 0:
+                        _frontend_build_state['status'] = 'error'
+                        _frontend_build_state['message'] = 'npm install failed'
+                        _frontend_build_state['log'] = install_result.stderr or install_result.stdout
+                        return
+                    _frontend_build_state['log'] += 'Dependencies installed successfully\n'
+                
+                # Run build
+                _frontend_build_state['message'] = 'Building frontend...'
+                logger.info("Building frontend...")
+                build_result = subprocess.run(
+                    [npm, "run", "build"],
+                    cwd=str(build_dir),
+                    capture_output=True,
+                    encoding='utf-8',
+                    errors='replace',
+                    timeout=300,
+                )
+                
+                if build_result.returncode != 0:
+                    _frontend_build_state['status'] = 'error'
+                    _frontend_build_state['message'] = 'Build failed'
+                    _frontend_build_state['log'] += build_result.stderr or build_result.stdout
+                    return
+                
+                _frontend_build_state['log'] += 'Build completed successfully\n'
+                
+                # Verify dist was created
+                if (build_dir / "dist").exists():
+                    _frontend_build_state['status'] = 'success'
+                    _frontend_build_state['message'] = 'Frontend built successfully'
+                    logger.info("Frontend built successfully via auto-build")
+                else:
+                    _frontend_build_state['status'] = 'error'
+                    _frontend_build_state['message'] = 'Build completed but dist not found'
+                    
+            except subprocess.TimeoutExpired:
+                _frontend_build_state['status'] = 'error'
+                _frontend_build_state['message'] = 'Build timed out (5 minutes)'
+            except Exception as e:
+                logger.exception("Auto-build failed")
+                _frontend_build_state['status'] = 'error'
+                _frontend_build_state['message'] = str(e)
+
+    def _check_and_mount_static():
+        """Check if dist exists and mount static files. Returns True if mounted."""
+        build_dir = _frontend_build_state['frontend_dir']
+        if build_dir and (build_dir / "dist").exists():
+            # Mount static files - need to do this dynamically after build
+            # We'll handle this in the catch-all route instead
+            return True
+        return False
+
     # Mount static files if frontend directory exists
     if frontend_dir and (frontend_dir / "dist").exists():
         app.mount("/assets", StaticFiles(directory=str(frontend_dir / "dist" / "assets")), name="assets")
@@ -894,6 +1012,196 @@ def create_app(
             if file_path.exists() and file_path.is_file():
                 return FileResponse(file_path)
             return FileResponse(frontend_dir / "dist" / "index.html")
+    else:
+        # Store frontend_dir for build endpoint (even when dist doesn't exist)
+        _frontend_build_dir = frontend_dir
+        
+        # Fallback route when frontend is not built
+        @app.get("/")
+        async def root_fallback():
+            from fastapi.responses import HTMLResponse
+            frontend_available = _frontend_build_dir is not None and _frontend_build_dir.exists()
+            
+            # Auto-trigger build if frontend is available and not already building/done
+            if frontend_available and _frontend_build_state['status'] in ('idle', 'error'):
+                # Start background build task
+                asyncio.create_task(_do_frontend_build())
+            
+            # Show auto-build status page
+            current_status = _frontend_build_state['status']
+            current_message = _frontend_build_state['message']
+            
+            return HTMLResponse(content="""
+<!DOCTYPE html>
+<html>
+<head>
+    <title>OpenHarness - Building Frontend</title>
+    <meta http-equiv="refresh" content="2">
+    <style>
+        body { font-family: system-ui, -apple-system, sans-serif; max-width: 600px; margin: 50px auto; padding: 20px; }
+        h1 { color: #333; }
+        .spinner {
+            border: 4px solid #f3f3f3; border-top: 4px solid #0066cc;
+            border-radius: 50%; width: 40px; height: 40px;
+            animation: spin 1s linear infinite; margin: 20px auto;
+        }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        code { background: #f4f4f4; padding: 2px 6px; border-radius: 4px; }
+        .status { margin: 15px 0; padding: 10px; border-radius: 6px; }
+        .status.building { background: #fff3cd; border: 1px solid #ffc107; }
+        .status.success { background: #d4edda; border: 1px solid #28a745; }
+        .status.error { background: #f8d7da; border: 1px solid #dc3545; }
+        .status.idle { background: #e7f3ff; border: 1px solid #0066cc; }
+        .status.not-available { background: #f4f4f4; border: 1px solid #ccc; }
+        .log { background: #1e1e1e; color: #d4d4d4; padding: 10px; border-radius: 6px; 
+               font-family: monospace; font-size: 12px; max-height: 200px; overflow-y: auto; }
+        .api-link { color: #0066cc; }
+        .progress-text { color: #666; font-size: 14px; margin-top: 10px; }
+    </style>
+</head>
+<body>
+    <h1>OpenHarness Web</h1>
+    <div id="status-container" class="status """ + current_status + """">
+        """ + (
+            '<div class="spinner"></div>' if current_status == 'building' else ''
+        ) + """
+        <div id="status-message">""" + (
+            'Building frontend... This may take a few minutes.<br><span class="progress-text">Page will auto-refresh when ready.</span>' if current_status == 'building' else
+            'Build completed! <a class="api-link" href="/">Click here to load the app</a>' if current_status == 'success' else
+            'Build failed: ' + (current_message or 'Unknown error') + '<br><a class="api-link" href="/">Try again</a>' if current_status == 'error' else
+            'Frontend source not available. Use the terminal UI: <code>oh</code>' if not frontend_available else
+            'Initializing build process...'
+        ) + """</div>
+    </div>
+    
+    <div id="log-container" style="margin-top: 20px;">
+        """ + (
+            '<div class="log">' + (_frontend_build_state.get('log', '') or 'Build output will appear here...') + '</div>' 
+            if current_status in ('building', 'error') else ''
+        ) + """
+    </div>
+    
+    <hr style="margin: 30px 0; border: none; border-top: 1px solid #ddd;">
+    
+    <p style="color: #666; font-size: 12px;">
+        While waiting, you can access the <a class="api-link" href="/api/health">API health endpoint</a>
+        or use the terminal UI: <code>oh</code>
+    </p>
+</body>
+</html>
+""", status_code=200)
+        
+        # Build status endpoint for polling
+        @app.get("/api/build-status")
+        async def get_build_status():
+            """Get current frontend build status."""
+            build_dir = _frontend_build_state['frontend_dir']
+            dist_exists = build_dir and (build_dir / "dist").exists()
+            return {
+                'status': _frontend_build_state['status'],
+                'message': _frontend_build_state['message'],
+                'log': _frontend_build_state.get('log', ''),
+                'frontend_available': build_dir is not None and build_dir.exists(),
+                'dist_exists': dist_exists,
+            }
+        
+        # Catch-all route for static files after build or assets
+        @app.get("/{path:path}")
+        async def catch_all(path: str):
+            from fastapi.responses import HTMLResponse
+            from fastapi import HTTPException
+            
+            # Skip API routes - they're already defined above
+            if path.startswith("api/"):
+                raise HTTPException(status_code=404, detail="API route not found")
+            
+            # Check if dist now exists (after successful build)
+            build_dir = _frontend_build_state['frontend_dir']
+            if build_dir and (build_dir / "dist").exists():
+                # Serve from built dist
+                file_path = build_dir / "dist" / path
+                if file_path.exists() and file_path.is_file():
+                    return FileResponse(file_path)
+                # For SPA routing, serve index.html for unmatched routes
+                if not path.startswith("assets/"):
+                    return FileResponse(build_dir / "dist" / "index.html")
+            
+            # Fallback to loading page if dist doesn't exist
+            # Redirect to root to trigger/check build
+            return HTMLResponse(content="""
+<!DOCTYPE html>
+<html>
+<head>
+    <title>OpenHarness - Loading</title>
+    <meta http-equiv="refresh" content="0;url=/">
+</head>
+<body>
+    <p>Redirecting to main page...</p>
+</body>
+</html>
+""", status_code=302)
+        
+        # Build frontend endpoint (manual trigger)
+        @app.post("/api/build-frontend")
+        async def build_frontend():
+            """Build the web frontend."""
+            import subprocess
+            import shutil
+            
+            if not _frontend_build_dir or not _frontend_build_dir.exists():
+                return {"status": "error", "message": "Frontend source not found"}
+            
+            try:
+                npm = shutil.which("npm") or "npm"
+                
+                # Check if node_modules exists, install if needed
+                if not (_frontend_build_dir / "node_modules").exists():
+                    logger.info("Installing frontend dependencies...")
+                    install_result = subprocess.run(
+                        [npm, "install", "--no-fund", "--no-audit"],
+                        cwd=str(_frontend_build_dir),
+                        capture_output=True,
+                        encoding='utf-8',
+                        errors='replace',
+                        timeout=300,
+                    )
+                    if install_result.returncode != 0:
+                        return {
+                            "status": "error",
+                            "message": "npm install failed",
+                            "log": install_result.stderr or install_result.stdout,
+                        }
+                
+                # Run build
+                logger.info("Building frontend...")
+                build_result = subprocess.run(
+                    [npm, "run", "build"],
+                    cwd=str(_frontend_build_dir),
+                    capture_output=True,
+                    encoding='utf-8',
+                    errors='replace',
+                    timeout=300,
+                )
+                
+                if build_result.returncode != 0:
+                    return {
+                        "status": "error",
+                        "message": "Build failed",
+                        "log": build_result.stderr or build_result.stdout,
+                    }
+                
+                # Verify dist was created
+                if (_frontend_build_dir / "dist").exists():
+                    logger.info("Frontend built successfully")
+                    return {"status": "success", "message": "Frontend built", "reload": True}
+                else:
+                    return {"status": "error", "message": "Build completed but dist not found"}
+                    
+            except subprocess.TimeoutExpired:
+                return {"status": "error", "message": "Build timed out (5 minutes)"}
+            except Exception as e:
+                logger.exception("Build failed")
+                return {"status": "error", "message": str(e)}
     
     # Initialize runtime on startup
     @app.on_event("startup")
@@ -1060,6 +1368,60 @@ async def run_web_server(
             if path.exists():
                 frontend_dir = path
                 break
+    
+    # Build frontend at startup if dist doesn't exist
+    if serve_frontend and frontend_dir and not (frontend_dir / "dist").exists():
+        logger.info("Web frontend not built. Building now...")
+        import subprocess
+        import shutil
+        
+        try:
+            npm = shutil.which("npm") or "npm"
+            
+            # Check if node_modules exists, install if needed
+            if not (frontend_dir / "node_modules").exists():
+                logger.info("Installing frontend dependencies...")
+                install_result = subprocess.run(
+                    [npm, "install", "--no-fund", "--no-audit"],
+                    cwd=str(frontend_dir),
+                    capture_output=True,
+                    encoding='utf-8',
+                    errors='replace',
+                    timeout=300,
+                )
+                if install_result.returncode != 0:
+                    logger.error(f"npm install failed: {install_result.stderr or install_result.stdout}")
+                else:
+                    logger.info("Frontend dependencies installed")
+            
+            # Run build
+            logger.info("Building frontend...")
+            build_result = subprocess.run(
+                [npm, "run", "build"],
+                cwd=str(frontend_dir),
+                capture_output=True,
+                encoding='utf-8',
+                errors='replace',
+                timeout=300,
+            )
+            
+            if build_result.returncode != 0:
+                logger.error(f"Frontend build failed: {build_result.stderr or build_result.stdout}")
+            elif (frontend_dir / "dist").exists():
+                logger.info("Frontend built successfully")
+            else:
+                logger.error("Frontend build completed but dist folder not found")
+                
+        except subprocess.TimeoutExpired:
+            logger.error("Frontend build timed out (5 minutes)")
+        except Exception as e:
+            logger.exception("Frontend build failed")
+            
+    elif serve_frontend and not frontend_dir:
+        logger.warning(
+            "Web frontend source not found. Serving API-only mode. "
+            "Use 'oh' for the terminal UI."
+        )
     
     # Check if port is available, find alternative if needed
     original_port = port

@@ -66,7 +66,8 @@ export interface BackendEvent {
         'modal_request' | 'select_request' | 'error' | 'mcp_servers' | 
         'bridge_sessions' | 'todo_updated' | 'swarm_teammates' | 
         'swarm_notifications' | 'token_usage' | 'state_update' | 
-        'permission_response_ack' | 'conversation_cleared' | 'config_saved';
+        'permission_response_ack' | 'conversation_cleared' | 'config_saved' |
+        'system' | 'status';
   state?: Record<string, unknown>;
   tasks?: TaskSnapshot[];
   item?: TranscriptItem;

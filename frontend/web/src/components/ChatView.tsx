@@ -1,10 +1,11 @@
-import React, { useRef, useEffect } from 'react';
+import React, { useRef, useEffect, useState } from 'react';
 import { Send, Bot, User, AlertCircle, Wrench, Paperclip, Maximize2, Minimize2, ChevronDown, ChevronUp, Sparkles, Brain, Plus, Copy, Check, Clock } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { useAppStore } from '../store/useAppStore';
 import { FileUpload } from './FileUpload';
 import { ModelSelector } from './ModelSelector';
+import { SlashCommandAutocomplete } from './SlashCommandAutocomplete';
 import styles from '../styles/ChatView.module.css';
 
 export function ChatView() {
@@ -27,8 +28,8 @@ export function ChatView() {
     clearMessages
   } = useAppStore();
   
-  const [input, setInput] = React.useState('');
-  const [copiedMessageId, setCopiedMessageId] = React.useState<string | null>(null);
+  const [input, setInput] = useState('');
+  const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const timelineTrackRef = useRef<HTMLDivElement>(null);
@@ -49,6 +50,7 @@ export function ChatView() {
   useEffect(() => {
     const container = messagesContainerRef.current;
     const timelineTrack = timelineTrackRef.current;
+    const viewportIndicator = timelineTrack?.querySelector(`.${styles.timelineViewport}`) as HTMLElement;
     if (!container) return;
 
     const handleScroll = () => {
@@ -61,11 +63,23 @@ export function ChatView() {
         const timelineScrollTop = progress * (timelineTrack.scrollHeight - timelineTrack.clientHeight);
         timelineTrack.scrollTop = timelineScrollTop;
       }
+      
+      // Update viewport indicator position
+      if (viewportIndicator) {
+        const trackHeight = timelineTrack?.clientHeight || 0;
+        const viewportHeight = Math.max(20, (container.clientHeight / container.scrollHeight) * trackHeight);
+        const viewportTop = progress * (trackHeight - viewportHeight);
+        viewportIndicator.style.height = `${viewportHeight}px`;
+        viewportIndicator.style.top = `${viewportTop}px`;
+      }
     };
 
+    // Initial call to set viewport indicator
+    handleScroll();
+    
     container.addEventListener('scroll', handleScroll);
     return () => container.removeEventListener('scroll', handleScroll);
-  }, [messages]);
+  }, [messages, styles.timelineViewport]);
 
   // Clear copied state after 2 seconds
   useEffect(() => {
@@ -100,9 +114,24 @@ export function ChatView() {
     const markers: { id: string; position: number; label: string; timestamp: number }[] = [];
     const numMarkers = Math.min(8, messages.length); // Max 8 markers
     
+    // Handle single message case to avoid division by zero
+    if (numMarkers === 1) {
+      const message = messages[0];
+      if (message?.id) {
+        markers.push({
+          id: message.id,
+          position: 0.5,
+          label: formatTime(message.timestamp),
+          timestamp: message.timestamp,
+        });
+      }
+      return markers;
+    }
+    
     for (let i = 0; i < numMarkers; i++) {
       const messageIndex = Math.floor((i / (numMarkers - 1)) * (messages.length - 1));
       const message = messages[messageIndex];
+      if (!message?.id) continue; // Skip if message is undefined or has no id
       const position = i / (numMarkers - 1);
       markers.push({
         id: message.id,
@@ -242,27 +271,6 @@ export function ChatView() {
       </div>
       
       <div className={styles.messagesContainer} ref={messagesContainerRef}>
-        {/* Timeline Scrollbar - Synced with message scroll */}
-        {messages.length > 5 && (
-          <div className={styles.timelineBar}>
-            <div className={styles.timelineHeader}>Timeline</div>
-            <div className={styles.timelineTrack} ref={timelineTrackRef}>
-              {/* Timeline markers - scrollable list */}
-              {getTimelineMarkers().map((marker, idx) => (
-                <button
-                  key={`marker-${idx}`}
-                  className={styles.timelineMarker}
-                  onClick={() => handleTimelineClick(marker.id)}
-                  title={formatTimelineLabel(marker.timestamp)}
-                >
-                  <Clock size={12} />
-                  <span className={styles.timelineLabel}>{formatTimelineLabel(marker.timestamp)}</span>
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
-        
         {messages.length === 0 ? (
           <div className={styles.welcome}>
             <div className={styles.welcomeIcon}>
@@ -296,9 +304,10 @@ export function ChatView() {
           </div>
         ) : (
           <>
-            {messages.map((message) => {
-              const isExpanded = expandedMessages.has(message.id);
-              const isLongContent = message.content.length > 500;
+            <div className={styles.messagesContent}>
+              {messages.filter(msg => msg?.id).map((message) => {
+                const isExpanded = expandedMessages.has(message.id);
+                const isLongContent = message.content.length > 500;
               
               return (
                 <div 
@@ -314,6 +323,7 @@ export function ChatView() {
                       <span className={styles.roleName}>
                         {message.role === 'assistant' ? 'OpenHarness' : 
                          message.role === 'user' ? 'You' :
+                         message.role === 'system' ? 'System' :
                          message.tool_name ? message.tool_name :
                          message.role}
                       </span>
@@ -372,7 +382,7 @@ export function ChatView() {
                         <ReactMarkdown 
                           remarkPlugins={[remarkGfm]}
                           components={{
-                            code({ className, children }) {
+                            code({ className, children }: React.HTMLAttributes<HTMLElement>) {
                               const match = /language-(\w+)/.exec(className || '');
                               const isInline = !match;
                               return !isInline ? (
@@ -383,46 +393,46 @@ export function ChatView() {
                                 <code className={styles.inlineCode}>{String(children)}</code>
                               );
                             },
-                            pre({ children }) {
+                            pre({ children }: React.HTMLAttributes<HTMLPreElement>) {
                               return <pre className={styles.markdownPre}>{children}</pre>;
                             },
-                            blockquote({ children }) {
+                            blockquote({ children }: React.HTMLAttributes<HTMLQuoteElement>) {
                               return <blockquote className={styles.blockquote}>{children}</blockquote>;
                             },
-                            ul({ children }) {
+                            ul({ children }: React.HTMLAttributes<HTMLUListElement>) {
                               return <ul className={styles.unorderedList}>{children}</ul>;
                             },
-                            ol({ children }) {
+                            ol({ children }: React.HTMLAttributes<HTMLOListElement>) {
                               return <ol className={styles.orderedList}>{children}</ol>;
                             },
-                            li({ children }) {
+                            li({ children }: React.HTMLAttributes<HTMLLIElement>) {
                               return <li className={styles.listItem}>{children}</li>;
                             },
-                            h1({ children }) {
+                            h1({ children }: React.HTMLAttributes<HTMLHeadingElement>) {
                               return <h1 className={styles.heading1}>{children}</h1>;
                             },
-                            h2({ children }) {
+                            h2({ children }: React.HTMLAttributes<HTMLHeadingElement>) {
                               return <h2 className={styles.heading2}>{children}</h2>;
                             },
-                            h3({ children }) {
+                            h3({ children }: React.HTMLAttributes<HTMLHeadingElement>) {
                               return <h3 className={styles.heading3}>{children}</h3>;
                             },
-                            p({ children }) {
+                            p({ children }: React.HTMLAttributes<HTMLParagraphElement>) {
                               return <p className={styles.paragraph}>{children}</p>;
                             },
-                            strong({ children }) {
+                            strong({ children }: React.HTMLAttributes<HTMLElement>) {
                               return <strong className={styles.strong}>{children}</strong>;
                             },
-                            em({ children }) {
+                            em({ children }: React.HTMLAttributes<HTMLElement>) {
                               return <em className={styles.em}>{children}</em>;
                             },
-                            table({ children }) {
+                            table({ children }: React.HTMLAttributes<HTMLTableElement>) {
                               return <div className={styles.tableWrapper}><table className={styles.table}>{children}</table></div>;
                             },
-                            th({ children }) {
+                            th({ children }: React.HTMLAttributes<HTMLTableCellElement>) {
                               return <th className={styles.tableHeader}>{children}</th>;
                             },
-                            td({ children }) {
+                            td({ children }: React.HTMLAttributes<HTMLTableCellElement>) {
                               return <td className={styles.tableCell}>{children}</td>;
                             },
                           }}
@@ -459,6 +469,31 @@ export function ChatView() {
               </div>
             )}
             <div ref={messagesEndRef} />
+          </div>
+          {/* Timeline Panel */}
+          <div className={styles.timelineBar}>
+              <div className={styles.timelineHeader}>
+                <Clock size={14} />
+                <span>Timeline</span>
+              </div>
+              <div className={styles.timelineTrack} ref={timelineTrackRef}>
+                {getTimelineMarkers().map((marker) => (
+                  <div
+                    key={marker.id}
+                    className={styles.timelineMarker}
+                    onClick={() => handleTimelineClick(marker.id)}
+                    title={`Jump to message at ${marker.label}`}
+                  >
+                    <div className={styles.markerDot} />
+                    <span className={styles.timelineLabel}>
+                      {formatTimelineLabel(marker.timestamp)}
+                    </span>
+                  </div>
+                ))}
+                {/* Viewport indicator */}
+                <div className={styles.timelineViewport} />
+              </div>
+            </div>
           </>
         )}
       </div>
@@ -519,12 +554,19 @@ export function ChatView() {
           </div>
           
           <div className={styles.inputWrapper} style={{ height: `${inputHeight}px` }}>
+            {/* Slash Command Autocomplete Dropdown */}
+            <SlashCommandAutocomplete
+              input={input}
+              setInput={setInput}
+              onSubmit={submitPrompt || (() => {})}
+              inputRef={inputRef}
+            />
             <textarea
               ref={inputRef}
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={handleKeyDown}
-              placeholder="Ask OpenHarness anything..."
+              placeholder="Ask OpenHarness anything... or type / for commands"
               disabled={isBusy}
               className={styles.textarea}
             />
@@ -557,9 +599,9 @@ export function ChatView() {
             </div>
           </div>
           <div className={styles.inputHints}>
-            <span>Press <kbd>Enter</kbd> to send</span>
-            <span><kbd>Shift+Enter</kbd> for new line</span>
-            <span>Drag handle to resize</span>
+            <span>Type <kbd>/</kbd> for commands</span>
+            <span><kbd>Enter</kbd> to send</span>
+            <span><kbd>Shift+Enter</kbd> new line</span>
           </div>
         </form>
       </div>
