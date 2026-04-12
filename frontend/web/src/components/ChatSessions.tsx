@@ -1,12 +1,73 @@
-import { Plus, MessageSquare, Trash2, Edit2, Check, X } from 'lucide-react';
-import { useState } from 'react';
+import { Plus, MessageSquare, Trash2, Edit2, Check, X, Search, XCircle } from 'lucide-react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import { useAppStore } from '../store/useAppStore';
 import styles from '../styles/ChatSessions.module.css';
 
 export function ChatSessions() {
-  const { chatSessions, currentChatId, createNewChat, switchChat, deleteChat, updateChatSession } = useAppStore();
+  const { 
+    chatSessions, 
+    currentChatId, 
+    createNewChat, 
+    switchChat, 
+    deleteChat, 
+    updateChatSession,
+    searchQuery,
+    searchResults,
+    setSearchQuery,
+    searchMessages,
+    clearSearch,
+    chatSidebarWidth,
+    setChatSidebarWidth,
+    isResizingChatSidebar,
+    setIsResizingChatSidebar
+  } = useAppStore();
+  
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editName, setEditName] = useState('');
+  const [showSearch, setShowSearch] = useState(false);
+  const sidebarRef = useRef<HTMLDivElement>(null);
+  const searchInputRef = useRef<HTMLInputElement>(null);
+
+  // Drag to resize chat sidebar
+  const handleMouseDown = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    setIsResizingChatSidebar(true);
+  }, [setIsResizingChatSidebar]);
+
+  useEffect(() => {
+    const handleMouseMove = (e: MouseEvent) => {
+      if (!isResizingChatSidebar) return;
+      
+      const newWidth = e.clientX;
+      const clampedWidth = Math.max(200, Math.min(450, newWidth));
+      setChatSidebarWidth(clampedWidth);
+    };
+
+    const handleMouseUp = () => {
+      setIsResizingChatSidebar(false);
+      document.body.style.cursor = 'default';
+      document.body.style.userSelect = 'auto';
+    };
+
+    if (isResizingChatSidebar) {
+      document.addEventListener('mousemove', handleMouseMove);
+      document.addEventListener('mouseup', handleMouseUp);
+      document.body.style.cursor = 'ew-resize';
+      document.body.style.userSelect = 'none';
+    }
+
+    return () => {
+      document.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, [isResizingChatSidebar, setChatSidebarWidth, setIsResizingChatSidebar]);
+
+  // Focus search input when shown
+  useEffect(() => {
+    if (showSearch && searchInputRef.current) {
+      searchInputRef.current.focus();
+    }
+  }, [showSearch]);
 
   const formatTime = (timestamp: number) => {
     const date = new Date(timestamp);
@@ -53,18 +114,102 @@ export function ChatSessions() {
     setEditName('');
   };
 
+  const handleSearchChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const query = e.target.value;
+    setSearchQuery(query);
+    searchMessages(query);
+  };
+
+  const handleSearchResultClick = (chatId: string) => {
+    switchChat(chatId);
+    clearSearch();
+    setShowSearch(false);
+  };
+
+  const handleClearSearch = () => {
+    clearSearch();
+    setShowSearch(false);
+  };
+
   return (
-    <div className={styles.chatSessions}>
+    <div className={styles.chatSessions} ref={sidebarRef} style={{ width: `${chatSidebarWidth}px` }}>
+      {/* Resize Handle */}
+      <div 
+        className={`${styles.resizeHandle} ${isResizingChatSidebar ? styles.resizing : ''}`}
+        onMouseDown={handleMouseDown}
+      />
+      
       <div className={styles.header}>
         <h3>Chat Sessions</h3>
-        <button 
-          className={styles.newChatButton}
-          onClick={() => createNewChat()}
-          title="New Chat"
-        >
-          <Plus size={18} />
-        </button>
+        <div className={styles.headerActions}>
+          <button 
+            className={`${styles.searchButton} ${showSearch ? styles.active : ''}`}
+            onClick={() => setShowSearch(!showSearch)}
+            title="Search messages"
+          >
+            <Search size={18} />
+          </button>
+          <button 
+            className={styles.newChatButton}
+            onClick={() => createNewChat()}
+            title="New Chat"
+          >
+            <Plus size={18} />
+          </button>
+        </div>
       </div>
+
+      {/* Search Input */}
+      {showSearch && (
+        <div className={styles.searchContainer}>
+          <div className={styles.searchInputWrapper}>
+            <Search size={16} className={styles.searchIcon} />
+            <input
+              ref={searchInputRef}
+              type="text"
+              value={searchQuery}
+              onChange={handleSearchChange}
+              placeholder="Search across all chats..."
+              className={styles.searchInput}
+            />
+            {searchQuery && (
+              <button 
+                className={styles.clearSearchButton}
+                onClick={handleClearSearch}
+                title="Clear search"
+              >
+                <XCircle size={16} />
+              </button>
+            )}
+          </div>
+          
+          {/* Search Results */}
+          {searchResults.length > 0 && (
+            <div className={styles.searchResults}>
+              <div className={styles.searchResultsHeader}>
+                Found {searchResults.length} messages
+              </div>
+              {searchResults.map((result) => (
+                <div 
+                  key={`${result.chatId}-${result.messageId}`}
+                  className={styles.searchResultItem}
+                  onClick={() => handleSearchResultClick(result.chatId)}
+                >
+                  <div className={styles.searchResultChat}>{result.chatName}</div>
+                  <div className={styles.searchResultContent}>{result.content}</div>
+                  <div className={styles.searchResultTime}>{formatTime(result.timestamp)}</div>
+                </div>
+              ))}
+            </div>
+          )}
+          
+          {searchQuery && searchResults.length === 0 && (
+            <div className={styles.noResults}>
+              No messages found matching "{searchQuery}"
+            </div>
+          )}
+        </div>
+      )}
 
       <div className={styles.sessions}>
         {chatSessions.length === 0 ? (

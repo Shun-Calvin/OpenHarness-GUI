@@ -75,8 +75,6 @@
 
 /* Timeline Sidebar - Fixed on the right side */
 .timelineBar {
-  width: 60px;
-  min-width: 60px;
   background: var(--bg-secondary);
   border-left: 1px solid var(--border-subtle);
   z-index: 10;
@@ -87,7 +85,7 @@
   position: relative;
   top: 0;
   height: 100%;
-  transition: width 0.2s ease;
+  transition: width 0.1s ease;
 }
 
 /* Custom scrollbar for timeline bar */
@@ -250,14 +248,66 @@
   left: 0;
   top: 0;
   bottom: 0;
-  width: 4px;
-  background: var(--border-subtle);
+  width: 6px;
+  background: transparent;
   cursor: ew-resize;
   transition: background 0.2s ease;
+  z-index: 5;
 }
 
 .timelineDragHandle:hover {
   background: var(--primary-500);
+}
+
+.timelineDragHandle.resizing {
+  background: var(--primary-500);
+}
+
+/* Pasted Images Preview */
+.pastedImagesPreview {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.pastedImageItem {
+  position: relative;
+  width: 80px;
+  height: 80px;
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  border: 1px solid var(--border-subtle);
+}
+
+.pastedImageThumbnail {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.removePastedImage {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 24px;
+  height: 24px;
+  background: rgba(0, 0, 0, 0.7);
+  border: none;
+  border-radius: var(--radius-sm);
+  color: white;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: var(--transition-fast);
+}
+
+.removePastedImage:hover {
+  background: var(--error-500);
+  transform: scale(1.1);
 }
 
 /* Welcome Screen - Gemini Style */
@@ -402,11 +452,20 @@
 }
 
 .message.user {
-  background: var(--bg-secondary);
+  background: linear-gradient(135deg, rgba(95, 115, 220, 0.08) 0%, rgba(95, 115, 220, 0.15) 100%);
+  border-left: 3px solid var(--primary-500);
+  margin-left: var(--space-4);
+  margin-right: var(--space-4);
+  border-radius: var(--radius-md);
+  border-bottom: 1px solid var(--border-subtle);
 }
 
 .message.assistant {
   background: transparent;
+  border-left: none;
+  margin-left: 0;
+  margin-right: 0;
+  border-radius: 0;
 }
 
 .message.system {
@@ -415,7 +474,8 @@
 
 .message.tool,
 .message.tool_result {
-  background: var(--bg-tertiary);
+  background: rgba(139, 92, 246, 0.05);
+  border-left: 2px solid var(--purple-500);
 }
 
 .messageHeader {
@@ -428,22 +488,23 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 36px;
-  height: 36px;
-  border-radius: var(--radius-md);
+  width: 40px;
+  height: 40px;
+  border-radius: var(--radius-lg);
   flex-shrink: 0;
   transition: var(--transition-fast);
 }
 
 .roleIcon.user {
-  background: linear-gradient(135deg, var(--primary-500) 0%, var(--primary-600) 100%);
+  background: linear-gradient(135deg, var(--primary-500) 0%, #4f46e5 100%);
   color: white;
+  box-shadow: 0 4px 12px rgba(95, 115, 220, 0.4);
 }
 
 .roleIcon.assistant {
-  background: linear-gradient(135deg, var(--primary-500) 0%, var(--purple-500) 100%);
+  background: linear-gradient(135deg, #10b981 0%, #059669 100%);
   color: white;
-  box-shadow: 0 2px 12px rgba(95, 115, 220, 0.3);
+  box-shadow: 0 4px 12px rgba(16, 185, 129, 0.4);
 }
 
 .roleIcon.tool,
@@ -467,6 +528,14 @@
   font-weight: 600;
   color: var(--text-primary);
   font-size: 0.9375rem;
+}
+
+.message.user .roleName {
+  color: var(--primary-500);
+}
+
+.message.assistant .roleName {
+  color: #10b981;
 }
 
 .timestamp {

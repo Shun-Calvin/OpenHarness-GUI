@@ -85,6 +85,8 @@ interface AppState {
   isBusy: boolean;
   sidebarOpen: boolean;
   sidebarWidth: number;
+  chatSidebarWidth: number;
+  timelineWidth: number;
   activePanel: 'chats' | 'tasks' | 'mcp' | 'swarm' | 'todo' | 'settings' | 'skills' | 'memory';
   terminalView: 'chat' | 'terminal';
   commandPaletteOpen: boolean;
@@ -93,6 +95,12 @@ interface AppState {
   expandedMessages: Set<string>;
   isResizingSidebar: boolean;
   isResizingInput: boolean;
+  isResizingChatSidebar: boolean;
+  isResizingTimeline: boolean;
+  
+  // Search state
+  searchQuery: string;
+  searchResults: { chatId: string; chatName: string; messageId: string; content: string; timestamp: number }[];
   
   // Callback actions (set by hooks)
   submitPrompt: ((prompt: string, files?: UploadedFile[]) => void) | null;
@@ -156,8 +164,18 @@ interface AppState {
   // Gemini-like features
   toggleMessageExpand: (messageId: string) => void;
   setSidebarWidth: (width: number) => void;
+  setChatSidebarWidth: (width: number) => void;
+  setTimelineWidth: (width: number) => void;
   setIsResizingSidebar: (resizing: boolean) => void;
   setIsResizingInput: (resizing: boolean) => void;
+  setIsResizingChatSidebar: (resizing: boolean) => void;
+  setIsResizingTimeline: (resizing: boolean) => void;
+  
+  // Search actions
+  setSearchQuery: (query: string) => void;
+  searchMessages: (query: string) => void;
+  clearSearch: () => void;
+  
   addSkill: (skill: Skill) => void;
   updateSkill: (skillId: string, updates: Partial<Skill>) => void;
   toggleSkill: (skillId: string) => void;
@@ -229,6 +247,8 @@ const STORAGE_KEYS = {
   CHANNELS: 'openharness-channels',
   AVAILABLE_MODELS: 'openharness-available-models',
   OPENHARNESS_CONFIG: 'openharness-openharness-config',
+  CHAT_SIDEBAR_WIDTH: 'openharness-chat-sidebar-width',
+  TIMELINE_WIDTH: 'openharness-timeline-width',
 };
 
 // Helper to load from localStorage
@@ -242,6 +262,20 @@ function loadFromStorage<T>(key: string, defaultValue: T): T {
     console.error(`Failed to load ${key} from localStorage:`, e);
   }
   return defaultValue;
+}
+
+// Helper to get initial messages from current chat session
+function getInitialMessages(): Message[] {
+  const chatSessions = loadFromStorage<ChatSession[]>(STORAGE_KEYS.CHAT_SESSIONS, []);
+  const currentChatId = loadFromStorage<string | null>(STORAGE_KEYS.CURRENT_CHAT_ID, null);
+  
+  if (currentChatId && chatSessions.length > 0) {
+    const currentChat = chatSessions.find(c => c.id === currentChatId);
+    if (currentChat && currentChat.messages) {
+      return currentChat.messages;
+    }
+  }
+  return [];
 }
 
 // Helper to save to localStorage
@@ -272,7 +306,7 @@ export const useAppStore = create<AppState>((set) => ({
   connected: false,
   connecting: false,
   error: null,
-  messages: [],
+  messages: getInitialMessages(),
   sessionState: null,
   tasks: [],
   mcpServers: [],
@@ -284,6 +318,8 @@ export const useAppStore = create<AppState>((set) => ({
   isBusy: false,
   sidebarOpen: true,
   sidebarWidth: 280,
+  chatSidebarWidth: loadFromStorage<number>(STORAGE_KEYS.CHAT_SIDEBAR_WIDTH, 280),
+  timelineWidth: loadFromStorage<number>(STORAGE_KEYS.TIMELINE_WIDTH, 60),
   activePanel: 'chats',
   terminalView: 'chat',
   commandPaletteOpen: false,
@@ -297,6 +333,10 @@ export const useAppStore = create<AppState>((set) => ({
   expandedMessages: new Set(),
   isResizingSidebar: false,
   isResizingInput: false,
+  isResizingChatSidebar: false,
+  isResizingTimeline: false,
+  searchQuery: '',
+  searchResults: [],
   
   // New features initial state - load from localStorage
   chatSessions: loadFromStorage<ChatSession[]>(STORAGE_KEYS.CHAT_SESSIONS, []),
@@ -604,8 +644,45 @@ export const useAppStore = create<AppState>((set) => ({
   }),
   
   setSidebarWidth: (width) => set({ sidebarWidth: width }),
+  setChatSidebarWidth: (width) => {
+    saveToStorage(STORAGE_KEYS.CHAT_SIDEBAR_WIDTH, width);
+    set({ chatSidebarWidth: width });
+  },
+  setTimelineWidth: (width) => {
+    saveToStorage(STORAGE_KEYS.TIMELINE_WIDTH, width);
+    set({ timelineWidth: width });
+  },
   setIsResizingSidebar: (resizing) => set({ isResizingSidebar: resizing }),
   setIsResizingInput: (resizing) => set({ isResizingInput: resizing }),
+  setIsResizingChatSidebar: (resizing) => set({ isResizingChatSidebar: resizing }),
+  setIsResizingTimeline: (resizing) => set({ isResizingTimeline: resizing }),
+  
+  setSearchQuery: (query) => set({ searchQuery: query }),
+  searchMessages: (query) => set((state) => {
+    if (!query.trim()) {
+      return { searchQuery: query, searchResults: [] };
+    }
+    
+    const results: { chatId: string; chatName: string; messageId: string; content: string; timestamp: number }[] = [];
+    const lowerQuery = query.toLowerCase();
+    
+    state.chatSessions.forEach(chat => {
+      chat.messages.forEach(msg => {
+        if (msg.content.toLowerCase().includes(lowerQuery)) {
+          results.push({
+            chatId: chat.id,
+            chatName: chat.name,
+            messageId: msg.id,
+            content: msg.content.substring(0, 150) + (msg.content.length > 150 ? '...' : ''),
+            timestamp: msg.timestamp
+          });
+        }
+      });
+    });
+    
+    return { searchQuery: query, searchResults: results };
+  }),
+  clearSearch: () => set({ searchQuery: '', searchResults: [] }),
   
   addSkill: (skill) => set((state) => {
     const newSkills = [...state.skills, { ...skill, createdAt: Date.now(), updatedAt: Date.now() }];

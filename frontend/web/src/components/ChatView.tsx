@@ -1,5 +1,5 @@
 import React, { useRef, useEffect, useLayoutEffect, useState, useCallback } from 'react';
-import { Send, Bot, User, AlertCircle, Wrench, Paperclip, Maximize2, Minimize2, ChevronDown, ChevronUp, Sparkles, Brain, Plus, Copy, Check, Clock } from 'lucide-react';
+import { Send, Bot, User, AlertCircle, Wrench, Paperclip, Maximize2, Minimize2, ChevronDown, ChevronUp, Sparkles, Brain, Plus, Copy, Check, Clock, X } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { useAppStore } from '../store/useAppStore';
@@ -25,17 +25,23 @@ export function ChatView() {
     createNewChat,
     currentChatId,
     chatSessions,
-    clearMessages
+    clearMessages,
+    timelineWidth,
+    setTimelineWidth,
+    isResizingTimeline,
+    setIsResizingTimeline
   } = useAppStore();
   
   const [input, setInput] = useState('');
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
   const [messagePositions, setMessagePositions] = useState<Map<string, number>>(new Map());
   const [pastedImages, setPastedImages] = useState<File[]>([]);
+  const [pastedImagePreview, setPastedImagePreview] = useState<string[]>([]);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesContentRef = useRef<HTMLDivElement>(null);
   const timelineTrackRef = useRef<HTMLDivElement>(null);
   const timelineContentRef = useRef<HTMLDivElement>(null);
+  const timelineBarRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const inputContainerRef = useRef<HTMLDivElement>(null);
   const resizeHandleRef = useRef<HTMLDivElement>(null);
@@ -323,10 +329,46 @@ export function ChatView() {
     };
   }, [isResizingInput, setInputHeight, setIsResizingInput]);
 
+  // Drag to resize timeline
+  useEffect(() => {
+    const handleMouseMove = (e: MouseEvent) => {
+      if (!isResizingTimeline) return;
+      
+      const windowWidth = window.innerWidth;
+      const newWidth = windowWidth - e.clientX;
+      const clampedWidth = Math.max(40, Math.min(150, newWidth));
+      setTimelineWidth(clampedWidth);
+    };
+
+    const handleMouseUp = () => {
+      setIsResizingTimeline(false);
+      document.body.style.cursor = 'default';
+      document.body.style.userSelect = 'auto';
+    };
+
+    if (isResizingTimeline) {
+      document.addEventListener('mousemove', handleMouseMove);
+      document.addEventListener('mouseup', handleMouseUp);
+      document.body.style.cursor = 'ew-resize';
+      document.body.style.userSelect = 'none';
+    }
+
+    return () => {
+      document.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, [isResizingTimeline, setTimelineWidth, setIsResizingTimeline]);
+
   const handleResizeStart = (e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
     setIsResizingInput(true);
+  };
+
+  const handleTimelineResizeStart = (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsResizingTimeline(true);
   };
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -364,6 +406,14 @@ export function ChatView() {
         const file = item.getAsFile();
         if (file) {
           imageFiles.push(file);
+          // Create preview URL
+          const reader = new FileReader();
+          reader.onload = (event) => {
+            if (event.target?.result) {
+              setPastedImagePreview(prev => [...prev, event.target!.result as string]);
+            }
+          };
+          reader.readAsDataURL(file);
         }
       }
     }
@@ -371,12 +421,13 @@ export function ChatView() {
     if (imageFiles.length > 0) {
       e.preventDefault();
       setPastedImages(prev => [...prev, ...imageFiles]);
-      
-      // Add file info to input as placeholder
-      const fileNames = imageFiles.map(f => f.name || `image-${Date.now()}.png`).join(', ');
-      setInput(prev => prev + ` [Attached: ${fileNames}]`);
     }
   }, []);
+  
+  const handleRemovePastedImage = (index: number) => {
+    setPastedImages(prev => prev.filter((_, i) => i !== index));
+    setPastedImagePreview(prev => prev.filter((_, i) => i !== index));
+  };
 
   const formatTime = (timestamp: number) => {
     return new Date(timestamp).toLocaleTimeString([], { 
@@ -640,7 +691,12 @@ export function ChatView() {
             <div ref={messagesEndRef} />
           </div>
           {/* Timeline Panel */}
-          <div className={styles.timelineBar}>
+          <div className={styles.timelineBar} ref={timelineBarRef} style={{ width: `${timelineWidth}px`, minWidth: `${timelineWidth}px` }}>
+              {/* Timeline Resize Handle */}
+              <div 
+                className={`${styles.timelineDragHandle} ${isResizingTimeline ? styles.resizing : ''}`}
+                onMouseDown={handleTimelineResizeStart}
+              />
               <div className={styles.timelineHeader}>
                 <Clock size={14} />
                 <span>Timeline</span>
@@ -693,18 +749,21 @@ export function ChatView() {
           </div>
         )}
 
-        {/* Pasted Images Indicator */}
+        {/* Pasted Images Preview */}
         {pastedImages.length > 0 && (
-          <div className={styles.attachedFiles}>
-            <span className={styles.attachedCount}>
-              🖼️ {pastedImages.length} pasted image(s)
-            </span>
-            <button 
-              className={styles.showUploadButton}
-              onClick={() => setPastedImages([])}
-            >
-              Clear
-            </button>
+          <div className={styles.pastedImagesPreview}>
+            {pastedImagePreview.map((preview, index) => (
+              <div key={index} className={styles.pastedImageItem}>
+                <img src={preview} alt={`Pasted image ${index + 1}`} className={styles.pastedImageThumbnail} />
+                <button 
+                  className={styles.removePastedImage}
+                  onClick={() => handleRemovePastedImage(index)}
+                  title="Remove image"
+                >
+                  <X size={14} />
+                </button>
+              </div>
+            ))}
           </div>
         )}
 
