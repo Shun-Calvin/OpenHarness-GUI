@@ -281,6 +281,11 @@ async def build_runtime(
         model=settings.model,
         system_prompt=system_prompt_text,
         max_tokens=settings.max_tokens,
+        context_window_tokens=settings.context_window_tokens or settings.memory.context_window_tokens,
+        auto_compact_threshold_tokens=(
+            settings.auto_compact_threshold_tokens
+            or settings.memory.auto_compact_threshold_tokens
+        ),
         max_turns=engine_max_turns,
         permission_prompt=permission_prompt,
         ask_user_prompt=ask_user_prompt,
