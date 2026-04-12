@@ -28,29 +28,58 @@ export function ChatSessions() {
   const sidebarRef = useRef<HTMLDivElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
 
-  // Drag to resize chat sidebar
+  // Drag to resize chat sidebar with requestAnimationFrame for smooth performance
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
     setIsResizingChatSidebar(true);
+    // Disable transitions during drag
+    if (sidebarRef.current) {
+      sidebarRef.current.style.transition = 'none';
+    }
   }, [setIsResizingChatSidebar]);
 
   useEffect(() => {
+    let rafId: number | null = null;
+    let lastWidth = chatSidebarWidth;
+    
     const handleMouseMove = (e: MouseEvent) => {
       if (!isResizingChatSidebar) return;
       
-      const newWidth = e.clientX;
-      const clampedWidth = Math.max(200, Math.min(450, newWidth));
-      setChatSidebarWidth(clampedWidth);
+      // Cancel pending frame if exists
+      if (rafId !== null) {
+        cancelAnimationFrame(rafId);
+      }
+      
+      // Schedule update on next frame
+      rafId = requestAnimationFrame(() => {
+        const newWidth = e.clientX;
+        const clampedWidth = Math.max(200, Math.min(450, newWidth));
+        
+        // Only update if width actually changed
+        if (clampedWidth !== lastWidth) {
+          lastWidth = clampedWidth;
+          setChatSidebarWidth(clampedWidth);
+        }
+        rafId = null;
+      });
     };
 
     const handleMouseUp = () => {
       setIsResizingChatSidebar(false);
       document.body.style.cursor = 'default';
       document.body.style.userSelect = 'auto';
+      // Re-enable transitions
+      if (sidebarRef.current) {
+        sidebarRef.current.style.transition = '';
+      }
+      if (rafId !== null) {
+        cancelAnimationFrame(rafId);
+        rafId = null;
+      }
     };
 
     if (isResizingChatSidebar) {
-      document.addEventListener('mousemove', handleMouseMove);
+      document.addEventListener('mousemove', handleMouseMove, { passive: true });
       document.addEventListener('mouseup', handleMouseUp);
       document.body.style.cursor = 'ew-resize';
       document.body.style.userSelect = 'none';
@@ -59,6 +88,9 @@ export function ChatSessions() {
     return () => {
       document.removeEventListener('mousemove', handleMouseMove);
       document.removeEventListener('mouseup', handleMouseUp);
+      if (rafId !== null) {
+        cancelAnimationFrame(rafId);
+      }
     };
   }, [isResizingChatSidebar, setChatSidebarWidth, setIsResizingChatSidebar]);
 

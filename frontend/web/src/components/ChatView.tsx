@@ -1,5 +1,5 @@
 import React, { useRef, useEffect, useLayoutEffect, useState, useCallback } from 'react';
-import { Send, Bot, User, AlertCircle, Wrench, Paperclip, Maximize2, Minimize2, ChevronDown, ChevronUp, Sparkles, Brain, Plus, Copy, Check, Clock, X } from 'lucide-react';
+import { Send, Bot, User, AlertCircle, Wrench, Paperclip, Maximize2, Minimize2, ChevronDown, ChevronUp, Sparkles, Brain, Plus, Copy, Check, Clock, X, ArrowUpToLine, ArrowDownToLine } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { useAppStore } from '../store/useAppStore';
@@ -83,6 +83,20 @@ export function ChatView() {
     }, 100);
     return () => clearTimeout(timer);
   }, [messages, expandedMessages, calculateMessagePositions]);
+
+  // Cleanup message refs when messages are removed
+  useEffect(() => {
+    const currentMessageIds = new Set(messages.map(m => m.id).filter(Boolean));
+    const refsToRemove: string[] = [];
+    
+    messageRefs.current.forEach((_, messageId) => {
+      if (!currentMessageIds.has(messageId)) {
+        refsToRemove.push(messageId);
+      }
+    });
+    
+    refsToRemove.forEach(id => messageRefs.current.delete(id));
+  }, [messages]);
 
   // Update positions on scroll to keep timeline markers in sync
   useEffect(() => {
@@ -236,36 +250,47 @@ export function ChatView() {
 
   const handleTimelineClick = (messageId: string) => {
     const messageElement = messageRefs.current.get(messageId);
-    if (messageElement) {
-      messageElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    if (messageElement && messagesContentRef.current) {
+      // Calculate position relative to the scrollable container
+      const container = messagesContentRef.current;
+      const elementOffset = messageElement.offsetTop - container.offsetTop;
+      // Scroll to show the element centered in the viewport
+      const scrollTarget = elementOffset - (container.clientHeight / 2) + (messageElement.offsetHeight / 2);
+      container.scrollTo({ top: scrollTarget, behavior: 'smooth' });
     }
   };
+  
+  // Quick navigation handlers
+  const handleJumpToFirst = () => {
+    if (messages.length === 0 || !messagesContentRef.current) {
+      console.log('[ChatView] No messages to jump to');
+      return;
+    }
+    console.log('[ChatView] Jump to first');
+    // Simply scroll to the top of the messages container
+    messagesContentRef.current.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+  
+  const handleJumpToLast = () => {
+    if (messages.length === 0 || !messagesContentRef.current) {
+      console.log('[ChatView] No messages to jump to');
+      return;
+    }
+    console.log('[ChatView] Jump to last');
+    // Simply scroll to the bottom of the messages container
+    const container = messagesContentRef.current;
+    const scrollTarget = container.scrollHeight - container.clientHeight;
+    container.scrollTo({ top: scrollTarget, behavior: 'smooth' });
+  };
 
-  // Generate timeline markers based on actual message scroll positions
+  // Generate timeline markers - show ALL messages for easy navigation
   const getTimelineMarkers = () => {
     if (messages.length === 0) return [];
     
-    const markers: { id: string; position: number; label: string; timestamp: number }[] = [];
+    const markers: { id: string; position: number; label: string; timestamp: number; role: string; index: number }[] = [];
     
-    // Select messages to show as markers (first, last, and evenly distributed in between)
-    const numMarkers = Math.min(8, messages.length);
-    
-    // Get unique message indices for markers
-    const markerIndices: number[] = [];
-    if (numMarkers === 1) {
-      markerIndices.push(0);
-    } else {
-      for (let i = 0; i < numMarkers; i++) {
-        const index = Math.floor((i / (numMarkers - 1)) * (messages.length - 1));
-        if (!markerIndices.includes(index)) {
-          markerIndices.push(index);
-        }
-      }
-    }
-    
-    // Create markers using actual positions from messagePositions state
-    markerIndices.forEach(index => {
-      const message = messages[index];
+    // Show all messages for navigation purposes
+    messages.forEach((message, index) => {
       if (!message?.id) return;
       
       // Use actual calculated position if available, otherwise estimate
@@ -278,8 +303,10 @@ export function ChatView() {
       markers.push({
         id: message.id,
         position,
-        label: formatTime(message.timestamp),
+        label: formatTimelineLabel(message.timestamp),
         timestamp: message.timestamp,
+        role: message.role,
+        index,
       });
     });
     
@@ -299,25 +326,46 @@ export function ChatView() {
     return date.toLocaleDateString([], { month: 'short', day: 'numeric' });
   };
 
-  // Drag to resize input area
+  // Drag to resize input area with requestAnimationFrame for smooth performance
   useEffect(() => {
+    let rafId: number | null = null;
+    let lastHeight = inputHeight;
+    
     const handleMouseMove = (e: MouseEvent) => {
       if (!isResizingInput || !inputContainerRef.current) return;
       
-      const containerRect = inputContainerRef.current.getBoundingClientRect();
-      const newHeight = containerRect.bottom - e.clientY;
-      const clampedHeight = Math.max(100, Math.min(400, newHeight));
-      setInputHeight(clampedHeight);
+      // Cancel pending frame if exists
+      if (rafId !== null) {
+        cancelAnimationFrame(rafId);
+      }
+      
+      // Schedule update on next frame
+      rafId = requestAnimationFrame(() => {
+        const containerRect = inputContainerRef.current!.getBoundingClientRect();
+        const newHeight = containerRect.bottom - e.clientY;
+        const clampedHeight = Math.max(100, Math.min(400, newHeight));
+        
+        // Only update if height actually changed
+        if (clampedHeight !== lastHeight) {
+          lastHeight = clampedHeight;
+          setInputHeight(clampedHeight);
+        }
+        rafId = null;
+      });
     };
 
     const handleMouseUp = () => {
       setIsResizingInput(false);
       document.body.style.cursor = 'default';
       document.body.style.userSelect = 'auto';
+      if (rafId !== null) {
+        cancelAnimationFrame(rafId);
+        rafId = null;
+      }
     };
 
     if (isResizingInput) {
-      document.addEventListener('mousemove', handleMouseMove);
+      document.addEventListener('mousemove', handleMouseMove, { passive: true });
       document.addEventListener('mouseup', handleMouseUp);
       document.body.style.cursor = 'ns-resize';
       document.body.style.userSelect = 'none';
@@ -326,28 +374,60 @@ export function ChatView() {
     return () => {
       document.removeEventListener('mousemove', handleMouseMove);
       document.removeEventListener('mouseup', handleMouseUp);
+      if (rafId !== null) {
+        cancelAnimationFrame(rafId);
+      }
     };
   }, [isResizingInput, setInputHeight, setIsResizingInput]);
 
-  // Drag to resize timeline
+  // Drag to resize timeline with requestAnimationFrame for smooth performance
   useEffect(() => {
+    let rafId: number | null = null;
+    let lastWidth = timelineWidth;
+    
     const handleMouseMove = (e: MouseEvent) => {
       if (!isResizingTimeline) return;
       
-      const windowWidth = window.innerWidth;
-      const newWidth = windowWidth - e.clientX;
-      const clampedWidth = Math.max(40, Math.min(150, newWidth));
-      setTimelineWidth(clampedWidth);
+      // Cancel pending frame if exists
+      if (rafId !== null) {
+        cancelAnimationFrame(rafId);
+      }
+      
+      // Schedule update on next frame
+      rafId = requestAnimationFrame(() => {
+        const windowWidth = window.innerWidth;
+        const newWidth = windowWidth - e.clientX;
+        const clampedWidth = Math.max(40, Math.min(150, newWidth));
+        
+        // Only update if width actually changed
+        if (clampedWidth !== lastWidth) {
+          lastWidth = clampedWidth;
+          setTimelineWidth(clampedWidth);
+        }
+        rafId = null;
+      });
     };
 
     const handleMouseUp = () => {
       setIsResizingTimeline(false);
       document.body.style.cursor = 'default';
       document.body.style.userSelect = 'auto';
+      // Re-enable transitions
+      if (timelineBarRef.current) {
+        timelineBarRef.current.style.transition = '';
+      }
+      if (rafId !== null) {
+        cancelAnimationFrame(rafId);
+        rafId = null;
+      }
     };
 
     if (isResizingTimeline) {
-      document.addEventListener('mousemove', handleMouseMove);
+      // Disable transitions during drag
+      if (timelineBarRef.current) {
+        timelineBarRef.current.style.transition = 'none';
+      }
+      document.addEventListener('mousemove', handleMouseMove, { passive: true });
       document.addEventListener('mouseup', handleMouseUp);
       document.body.style.cursor = 'ew-resize';
       document.body.style.userSelect = 'none';
@@ -356,6 +436,9 @@ export function ChatView() {
     return () => {
       document.removeEventListener('mousemove', handleMouseMove);
       document.removeEventListener('mouseup', handleMouseUp);
+      if (rafId !== null) {
+        cancelAnimationFrame(rafId);
+      }
     };
   }, [isResizingTimeline, setTimelineWidth, setIsResizingTimeline]);
 
@@ -449,7 +532,7 @@ export function ChatView() {
         return <Bot size={20} />;
       case 'tool':
       case 'tool_result':
-        return <Wrench size={20} />;
+        return <Bot size={20} />; // Same as assistant for consistent styling
       case 'system':
         return <AlertCircle size={20} />;
       default:
@@ -528,13 +611,82 @@ export function ChatView() {
               {messages.filter(msg => msg?.id).map((message) => {
                 const isExpanded = expandedMessages.has(message.id);
                 const isLongContent = message.content.length > 500;
+                const isUser = message.role === 'user';
               
               return (
                 <div 
                   key={message.id}
-                  ref={(el) => { if (el) messageRefs.current.set(message.id, el); }}
+                  ref={(el) => { 
+                    if (el) {
+                      messageRefs.current.set(message.id, el);
+                    } else {
+                      messageRefs.current.delete(message.id);
+                    }
+                  }}
                   className={`${styles.message} ${styles[message.role]}`}
                 >
+                  {/* User messages: right-aligned container */}
+                  {isUser ? (
+                    <div className={styles.userMessageWrapper}>
+                      <div className={styles.userMessageBubble}>
+                        <div className={styles.messageHeader}>
+                          <div className={`${styles.roleIcon} ${styles[message.role]}`}>
+                            {getRoleIcon(message.role)}
+                          </div>
+                          <div className={styles.messageInfo}>
+                            <span className={styles.roleName}>You</span>
+                            <span className={styles.timestamp}>
+                              {formatTime(message.timestamp)}
+                            </span>
+                          </div>
+                          {/* Copy button */}
+                          <button
+                            className={styles.copyButton}
+                            onClick={() => handleCopyMessage(message.content, message.id)}
+                            title="Copy message"
+                          >
+                            {copiedMessageId === message.id ? (
+                              <Check size={16} />
+                            ) : (
+                              <Copy size={16} />
+                            )}
+                          </button>
+                        </div>
+                        <div 
+                          className={`${styles.messageContent} ${isExpanded ? styles.expanded : ''}`}
+                        >
+                          <div className={styles.text}>
+                            <ReactMarkdown 
+                              remarkPlugins={[remarkGfm]}
+                              components={{
+                                code({ className, children }: React.HTMLAttributes<HTMLElement>) {
+                                  const match = /language-(\w+)/.exec(className || '');
+                                  const isInline = !match;
+                                  return !isInline ? (
+                                    <pre className={`${className} ${styles.codeBlock}`}>
+                                      <code>{String(children).replace(/\n$/, '')}</code>
+                                    </pre>
+                                  ) : (
+                                    <code className={styles.inlineCode}>{String(children)}</code>
+                                  );
+                                },
+                                pre({ children }: React.HTMLAttributes<HTMLPreElement>) {
+                                  return <pre className={styles.markdownPre}>{children}</pre>;
+                                },
+                                p({ children }: React.HTMLAttributes<HTMLParagraphElement>) {
+                                  return <p className={styles.paragraph}>{children}</p>;
+                                },
+                              }}
+                            >
+                              {message.content}
+                            </ReactMarkdown>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  ) : (
+                    /* Non-user messages: standard left-aligned layout */
+                    <>
                   <div className={styles.messageHeader}>
                     <div className={`${styles.roleIcon} ${styles[message.role]}`}>
                       {getRoleIcon(message.role)}
@@ -542,7 +694,6 @@ export function ChatView() {
                     <div className={styles.messageInfo}>
                       <span className={styles.roleName}>
                         {message.role === 'assistant' ? 'OpenHarness' : 
-                         message.role === 'user' ? 'You' :
                          message.role === 'system' ? 'System' :
                          message.tool_name ? message.tool_name :
                          message.role}
@@ -551,8 +702,8 @@ export function ChatView() {
                         {formatTime(message.timestamp)}
                       </span>
                     </div>
-                    {/* Response time and token usage for assistant messages */}
-                    {message.role === 'assistant' && (message.responseTime || message.tokenUsage) && (
+                    {/* Response time and token usage for assistant/tool messages */}
+                    {(message.role === 'assistant' || message.role === 'tool' || message.role === 'tool_result') && (message.responseTime || message.tokenUsage) && (
                       <div className={styles.messageStats}>
                         {message.responseTime && (
                           <span className={styles.statItem} title="Response time">
@@ -670,6 +821,8 @@ export function ChatView() {
                       </div>
                     )}
                   </div>
+                    </>
+                  )}
                 </div>
               );
             })}
@@ -701,19 +854,45 @@ export function ChatView() {
                 <Clock size={14} />
                 <span>Timeline</span>
               </div>
+              
+              {/* Quick Navigation Buttons */}
+              <div className={styles.timelineNavButtons}>
+                <button 
+                  className={styles.timelineNavBtn}
+                  onClick={handleJumpToFirst}
+                  title="Jump to first message"
+                  disabled={messages.length === 0}
+                >
+                  <ArrowUpToLine size={14} />
+                </button>
+                <button 
+                  className={styles.timelineNavBtn}
+                  onClick={handleJumpToLast}
+                  title="Jump to last message"
+                  disabled={messages.length === 0}
+                >
+                  <ArrowDownToLine size={14} />
+                </button>
+              </div>
+              
               <div className={styles.timelineTrack} ref={timelineTrackRef}>
                 <div className={styles.timelineContent} ref={timelineContentRef}>
+                  {/* Message count indicator */}
+                  <div className={styles.timelineInfo}>
+                    {messages.length} messages
+                  </div>
+                  {/* Timeline markers */}
                   {getTimelineMarkers().map((marker) => (
                     <div
                       key={marker.id}
-                      className={styles.timelineMarker}
+                      className={`${styles.timelineMarker} ${styles[`marker-${marker.role}`] || ''}`}
                       style={{ top: `${marker.position * 100}%` }}
                       onClick={() => handleTimelineClick(marker.id)}
-                      title={`Jump to message at ${marker.label}`}
+                      title={`${marker.role === 'user' ? 'Your message' : marker.role === 'assistant' ? 'Assistant' : 'Tool'} - ${marker.label}`}
                     >
-                      <div className={styles.markerDot} />
+                      <div className={`${styles.markerDot} ${styles[`dot-${marker.role}`] || ''}`} />
                       <span className={styles.timelineLabel}>
-                        {formatTimelineLabel(marker.timestamp)}
+                        {marker.role === 'user' ? '👤' : marker.role === 'assistant' ? '🤖' : '🔧'}
                       </span>
                     </div>
                   ))}

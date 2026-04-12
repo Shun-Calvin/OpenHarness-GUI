@@ -39,29 +39,58 @@ export function Sidebar() {
   
   const sidebarRef = useRef<HTMLDivElement>(null);
 
-  // Drag to resize sidebar
+  // Drag to resize sidebar with requestAnimationFrame for smooth performance
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
     setIsResizingSidebar(true);
+    // Disable transitions during drag for instant response
+    if (sidebarRef.current) {
+      sidebarRef.current.style.transition = 'none';
+    }
   }, [setIsResizingSidebar]);
 
   useEffect(() => {
+    let rafId: number | null = null;
+    let lastWidth = sidebarWidth;
+    
     const handleMouseMove = (e: MouseEvent) => {
       if (!isResizingSidebar) return;
       
-      const newWidth = e.clientX;
-      const clampedWidth = Math.max(200, Math.min(500, newWidth));
-      setSidebarWidth(clampedWidth);
+      // Cancel pending frame if exists
+      if (rafId !== null) {
+        cancelAnimationFrame(rafId);
+      }
+      
+      // Schedule update on next frame
+      rafId = requestAnimationFrame(() => {
+        const newWidth = e.clientX;
+        const clampedWidth = Math.max(200, Math.min(500, newWidth));
+        
+        // Only update if width actually changed
+        if (clampedWidth !== lastWidth) {
+          lastWidth = clampedWidth;
+          setSidebarWidth(clampedWidth);
+        }
+        rafId = null;
+      });
     };
 
     const handleMouseUp = () => {
       setIsResizingSidebar(false);
       document.body.style.cursor = 'default';
       document.body.style.userSelect = 'auto';
+      // Re-enable transitions
+      if (sidebarRef.current) {
+        sidebarRef.current.style.transition = '';
+      }
+      if (rafId !== null) {
+        cancelAnimationFrame(rafId);
+        rafId = null;
+      }
     };
 
     if (isResizingSidebar) {
-      document.addEventListener('mousemove', handleMouseMove);
+      document.addEventListener('mousemove', handleMouseMove, { passive: true });
       document.addEventListener('mouseup', handleMouseUp);
       document.body.style.cursor = 'ew-resize';
       document.body.style.userSelect = 'none';
@@ -70,6 +99,9 @@ export function Sidebar() {
     return () => {
       document.removeEventListener('mousemove', handleMouseMove);
       document.removeEventListener('mouseup', handleMouseUp);
+      if (rafId !== null) {
+        cancelAnimationFrame(rafId);
+      }
     };
   }, [isResizingSidebar, setSidebarWidth, setIsResizingSidebar]);
 

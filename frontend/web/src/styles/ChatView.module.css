@@ -118,10 +118,57 @@
   display: flex;
   align-items: center;
   justify-content: center;
+  gap: var(--space-1);
 }
 
 .timelineHeader svg {
-  margin-right: var(--space-1);
+  flex-shrink: 0;
+}
+
+/* Timeline Navigation Buttons */
+.timelineNavButtons {
+  display: flex;
+  gap: var(--space-1);
+  padding: var(--space-2);
+  border-bottom: 1px solid var(--border-subtle);
+  background: var(--bg-secondary);
+  flex-shrink: 0;
+}
+
+.timelineNavBtn {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-2);
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: var(--transition-fast);
+}
+
+.timelineNavBtn:hover:not(:disabled) {
+  background: var(--primary-500);
+  color: white;
+  border-color: var(--primary-500);
+}
+
+.timelineNavBtn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.timelineInfo {
+  padding: var(--space-2);
+  font-size: 0.6875rem;
+  color: var(--text-tertiary);
+  background: var(--bg-secondary);
+  border-radius: var(--radius-sm);
+  margin: var(--space-2);
+  text-align: center;
+  border: 1px solid var(--border-subtle);
 }
 
 .timelineTrack {
@@ -130,7 +177,7 @@
   overflow-y: auto;
   overflow-x: hidden;
   pointer-events: auto;
-  padding: var(--space-2) 0;
+  padding: 0;
   min-height: 0; /* Allow flexbox to shrink */
 }
 
@@ -161,14 +208,14 @@
 
 .timelineViewport {
   position: absolute;
-  left: 0;
-  right: 0;
-  background: rgba(95, 115, 220, 0.1);
+  left: 2px;
+  right: 2px;
+  background: rgba(95, 115, 220, 0.15);
   border: 1px solid var(--primary-500);
   border-radius: var(--radius-sm);
-  transition: top 0.1s ease, height 0.1s ease;
+  transition: top 0.05s ease, height 0.05s ease;
   pointer-events: none;
-  z-index: 2;
+  z-index: 1;
 }
 
 .timelineMarker {
@@ -179,7 +226,7 @@
   align-items: center;
   justify-content: center;
   gap: var(--space-1);
-  padding: var(--space-1) var(--space-2);
+  padding: 2px 4px;
   background: var(--bg-tertiary);
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-sm);
@@ -189,24 +236,59 @@
   transition: var(--transition-fast);
   white-space: nowrap;
   overflow: hidden;
-  z-index: 1;
+  z-index: 2;
   transform: translateY(-50%);
   user-select: none;
-  max-width: 100%;
+  min-height: 18px;
+}
+
+/* User message markers - more prominent */
+.timelineMarker.marker-user {
+  background: linear-gradient(135deg, rgba(95, 115, 220, 0.2) 0%, rgba(95, 115, 220, 0.3) 100%);
+  border-color: var(--primary-500);
+  color: var(--primary-500);
+  font-weight: 600;
+  min-height: 22px;
+}
+
+/* Assistant message markers */
+.timelineMarker.marker-assistant {
+  background: rgba(16, 185, 129, 0.1);
+  border-color: rgba(16, 185, 129, 0.3);
+  color: #10b981;
+}
+
+/* Tool message markers */
+.timelineMarker.marker-tool,
+.timelineMarker.marker-tool_result {
+  background: rgba(139, 92, 246, 0.1);
+  border-color: rgba(139, 92, 246, 0.3);
+  color: var(--purple-500);
 }
 
 .timelineBar:hover .timelineMarker {
-  padding: var(--space-1) var(--space-3);
-  background: var(--bg-elevated);
+  padding: 3px 6px;
 }
 
 .timelineMarker:hover {
   background: var(--bg-elevated);
-  color: var(--primary-500);
-  border-color: var(--primary-500);
+  color: var(--text-primary);
+  border-color: var(--primary-400);
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
-  transform: translateY(-50%) scale(1.05);
-  z-index: 2;
+  transform: translateY(-50%) scale(1.1);
+  z-index: 3;
+}
+
+.timelineMarker.marker-user:hover {
+  background: linear-gradient(135deg, rgba(95, 115, 220, 0.4) 0%, rgba(95, 115, 220, 0.5) 100%);
+  border-color: var(--primary-400);
+  color: var(--primary-400);
+}
+
+.timelineMarker.marker-assistant:hover {
+  background: rgba(16, 185, 129, 0.2);
+  border-color: #10b981;
+  color: #059669;
 }
 
 .timelineMarker svg {
@@ -214,32 +296,37 @@
 }
 
 .markerDot {
-  width: 8px;
-  height: 8px;
-  background: var(--primary-500);
+  width: 6px;
+  height: 6px;
+  background: var(--text-tertiary);
   border-radius: 50%;
   flex-shrink: 0;
+  display: none; /* Hide dot, use emoji instead */
 }
 
-.timelineBar:hover .markerDot {
-  width: 10px;
-  height: 10px;
+.markerDot.dot-user {
+  background: var(--primary-500);
 }
 
-.timelineMarker:hover .markerDot {
-  background: var(--primary-400);
+.markerDot.dot-assistant {
+  background: #10b981;
+}
+
+.markerDot.dot-tool,
+.markerDot.dot-tool_result {
+  background: var(--purple-500);
 }
 
 .timelineLabel {
   font-weight: 500;
   overflow: hidden;
   text-overflow: ellipsis;
-  opacity: 0;
-  transition: opacity 0.2s ease;
+  text-align: center;
+  font-size: 0.75rem;
 }
 
 .timelineBar:hover .timelineLabel {
-  opacity: 1;
+  /* Labels always visible now */
 }
 
 /* Timeline drag handle */
@@ -451,31 +538,90 @@
   }
 }
 
+/* User messages - right-aligned wrapper */
 .message.user {
-  background: linear-gradient(135deg, rgba(95, 115, 220, 0.08) 0%, rgba(95, 115, 220, 0.15) 100%);
-  border-left: 3px solid var(--primary-500);
-  margin-left: var(--space-4);
-  margin-right: var(--space-4);
-  border-radius: var(--radius-md);
-  border-bottom: 1px solid var(--border-subtle);
+  background: transparent;
+  padding: var(--space-4) var(--space-6);
+  padding-left: 20%;
+  justify-content: flex-end;
 }
 
+.userMessageWrapper {
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  width: 100%;
+}
+
+.userMessageBubble {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  background: linear-gradient(135deg, rgba(95, 115, 220, 0.12) 0%, rgba(95, 115, 220, 0.2) 100%);
+  border: 1px solid rgba(95, 115, 220, 0.3);
+  border-radius: var(--radius-lg);
+  padding: var(--space-4);
+  margin-left: auto;
+  max-width: 80%;
+  animation: userBubbleSlide 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+@keyframes userBubbleSlide {
+  from {
+    opacity: 0;
+    transform: translateX(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+.message.user .messageHeader {
+  justify-content: flex-end;
+  flex-direction: row-reverse;
+}
+
+.message.user .messageInfo {
+  text-align: right;
+}
+
+/* User message content */
+.message.user .messageContent {
+  color: var(--text-primary);
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+.message.user .text {
+  color: var(--text-primary);
+}
+
+/* Assistant messages - standard left alignment */
 .message.assistant {
   background: transparent;
   border-left: none;
-  margin-left: 0;
-  margin-right: 0;
-  border-radius: 0;
+  padding-left: var(--space-6);
+  padding-right: calc(var(--space-8) + 5%);
 }
 
 .message.system {
   background: var(--bg-tertiary);
 }
 
+/* Tool messages - same styling as assistant */
 .message.tool,
 .message.tool_result {
-  background: rgba(139, 92, 246, 0.05);
-  border-left: 2px solid var(--purple-500);
+  background: transparent;
+  border-left: none;
+  padding-left: var(--space-6);
+  padding-right: calc(var(--space-8) + 5%);
+}
+
+/* Tool messages same styling as assistant */
+.message.tool .text,
+.message.tool_result .text {
+  color: var(--text-primary);
 }
 
 .messageHeader {
@@ -507,10 +653,12 @@
   box-shadow: 0 4px 12px rgba(16, 185, 129, 0.4);
 }
 
+/* Tool icons same as assistant */
 .roleIcon.tool,
 .roleIcon.tool_result {
-  background: linear-gradient(135deg, var(--purple-500) 0%, var(--purple-600) 100%);
+  background: linear-gradient(135deg, #10b981 0%, #059669 100%);
   color: white;
+  box-shadow: 0 4px 12px rgba(16, 185, 129, 0.4);
 }
 
 .roleIcon.system {
@@ -535,6 +683,12 @@
 }
 
 .message.assistant .roleName {
+  color: #10b981;
+}
+
+/* Tool messages same as assistant */
+.message.tool .roleName,
+.message.tool_result .roleName {
   color: #10b981;
 }
 
@@ -638,10 +792,6 @@
   height: 60px;
   background: linear-gradient(to bottom, transparent 0%, var(--bg-primary) 100%);
   pointer-events: none;
-}
-
-.message.user .messageContent {
-  color: var(--text-primary);
 }
 
 .messageContent pre {
