@@ -81,7 +81,6 @@ def test_build_runtime_system_prompt_uses_coordinator_prompt_when_enabled(tmp_pa
     assert "You are a **coordinator**." in prompt
     assert "Coordinator User Context" not in prompt
     assert "Workers spawned via the agent tool have access to these tools" not in prompt
-    assert "Environment" not in prompt
 
 
 def test_build_runtime_system_prompt_skips_coordinator_context_when_disabled(tmp_path: Path, monkeypatch):
@@ -94,4 +93,7 @@ def test_build_runtime_system_prompt_skips_coordinator_context_when_disabled(tmp
 
     assert "Coordinator User Context" not in prompt
     assert "You are a **coordinator**." not in prompt
+    assert "Delegation And Subagents" in prompt
+    assert 'subagent_type="worker"' in prompt
+    assert "/agents show TASK_ID" in prompt
     assert "Environment" in prompt

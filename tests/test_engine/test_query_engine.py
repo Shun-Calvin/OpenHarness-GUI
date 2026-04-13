@@ -644,6 +644,33 @@ async def test_execute_tool_call_applies_path_rules_to_directory_roots(tmp_path:
 
 
 @pytest.mark.asyncio
+async def test_execute_tool_call_returns_actionable_reason_when_user_denies_confirmation(tmp_path: Path):
+    async def _deny(_tool_name: str, _reason: str) -> bool:
+        return False
+
+    result = await _execute_tool_call(
+        QueryContext(
+            api_client=_NoopApiClient(),
+            tool_registry=create_default_tool_registry(),
+            permission_checker=PermissionChecker(PermissionSettings(mode=PermissionMode.DEFAULT)),
+            cwd=tmp_path,
+            model="claude-test",
+            system_prompt="system",
+            max_tokens=1,
+            max_turns=1,
+            permission_prompt=_deny,
+        ),
+        "bash",
+        "toolu_bash",
+        {"command": "mkdir -p scratch-dir"},
+    )
+
+    assert result.is_error is True
+    assert "Mutating tools require user confirmation" in result.content
+    assert "/permissions full_auto" in result.content
+
+
+@pytest.mark.asyncio
 async def test_query_engine_executes_ask_user_tool(tmp_path: Path):
     async def _answer(question: str) -> str:
         assert question == "Which color?"

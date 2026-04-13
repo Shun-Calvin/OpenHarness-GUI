@@ -85,7 +85,7 @@ function QuestionModal({
 	);
 }
 
-export function ModalHost({
+function ModalHostInner({
 	modal,
 	modalInput,
 	setModalInput,
@@ -147,3 +147,5 @@ export function ModalHost({
 	}
 	return null;
 }
+
+export const ModalHost = React.memo(ModalHostInner);

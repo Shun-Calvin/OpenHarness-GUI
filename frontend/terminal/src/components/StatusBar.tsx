@@ -54,7 +54,7 @@ function PlanModeIndicator({
 	);
 }
 
-export function StatusBar({
+function StatusBarInner({
 	status,
 	tasks,
 	activeToolName,
@@ -108,6 +108,8 @@ export function StatusBar({
 		</Box>
 	);
 }
+
+export const StatusBar = React.memo(StatusBarInner);
 
 function formatNum(n: number): string {
 	if (n >= 1000) {

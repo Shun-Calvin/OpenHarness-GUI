@@ -76,6 +76,53 @@ async def test_permissions_command_persists(tmp_path: Path, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_permissions_command_is_marked_local_only(tmp_path: Path, monkeypatch):
+    monkeypatch.setenv("OPENHARNESS_CONFIG_DIR", str(tmp_path / "config"))
+    registry = create_default_command_registry()
+    command, _ = registry.lookup("/permissions set full_auto")
+    assert command is not None
+    assert command.remote_invocable is False
+
+
+@pytest.mark.asyncio
+async def test_permissions_command_supports_explicit_remote_admin_opt_in(tmp_path: Path, monkeypatch):
+    monkeypatch.setenv("OPENHARNESS_CONFIG_DIR", str(tmp_path / "config"))
+    registry = create_default_command_registry()
+    command, _ = registry.lookup("/permissions set full_auto")
+    assert command is not None
+    assert getattr(command, "remote_admin_opt_in", False) is True
+
+
+@pytest.mark.asyncio
+async def test_memory_show_rejects_path_traversal(tmp_path: Path, monkeypatch):
+    monkeypatch.setenv("OPENHARNESS_CONFIG_DIR", str(tmp_path / "config"))
+    monkeypatch.setenv("OPENHARNESS_DATA_DIR", str(tmp_path / "data"))
+    registry = create_default_command_registry()
+    command, args = registry.lookup("/memory show ../../../../../../etc/hosts")
+    assert command is not None
+
+    result = await command.handler(args, CommandContext(engine=_make_engine(tmp_path), cwd=str(tmp_path)))
+
+    assert result.message == "Memory entry path must stay within the project memory directory."
+
+
+@pytest.mark.asyncio
+async def test_memory_show_reads_normal_entries_with_md_fallback(tmp_path: Path, monkeypatch):
+    monkeypatch.setenv("OPENHARNESS_CONFIG_DIR", str(tmp_path / "config"))
+    monkeypatch.setenv("OPENHARNESS_DATA_DIR", str(tmp_path / "data"))
+    registry = create_default_command_registry()
+
+    add_command, add_args = registry.lookup("/memory add Notes :: hello world")
+    assert add_command is not None
+    await add_command.handler(add_args, CommandContext(engine=_make_engine(tmp_path), cwd=str(tmp_path)))
+
+    show_command, show_args = registry.lookup("/memory show Notes")
+    result = await show_command.handler(show_args, CommandContext(engine=_make_engine(tmp_path), cwd=str(tmp_path)))
+
+    assert "hello world" in result.message
+
+
+@pytest.mark.asyncio
 async def test_model_command_persists(tmp_path: Path, monkeypatch):
     monkeypatch.setenv("OPENHARNESS_CONFIG_DIR", str(tmp_path / "config"))
     registry = create_default_command_registry()
@@ -493,6 +540,30 @@ async def test_agents_session_files_and_reload_plugins_commands(tmp_path: Path, 
     agent_show_command, agent_show_args = registry.lookup(f"/agents show {task.id}")
     agent_show_result = await agent_show_command.handler(agent_show_args, context)
     assert "test agent" in agent_show_result.message
+
+
+@pytest.mark.asyncio
+async def test_agents_help_and_subagents_alias(tmp_path: Path, monkeypatch):
+    monkeypatch.setenv("OPENHARNESS_CONFIG_DIR", str(tmp_path / "config"))
+    monkeypatch.setenv("OPENHARNESS_DATA_DIR", str(tmp_path / "data"))
+    registry = create_default_command_registry()
+    context = _make_context(tmp_path)
+
+    agents_help_command, agents_help_args = registry.lookup("/agents help")
+    assert agents_help_command is not None
+    agents_help_result = await agents_help_command.handler(agents_help_args, context)
+    assert "Subagent guide:" in agents_help_result.message
+    assert 'subagent_type="worker"' in agents_help_result.message
+
+    subagents_command, subagents_args = registry.lookup("/subagents")
+    assert subagents_command is not None
+    subagents_result = await subagents_command.handler(subagents_args, context)
+    assert "Subagent guide:" in subagents_result.message
+
+    agents_command, agents_args = registry.lookup("/agents")
+    assert agents_command is not None
+    agents_result = await agents_command.handler(agents_args, context)
+    assert "Subagent guide:" in agents_result.message
 
 
 @pytest.mark.asyncio

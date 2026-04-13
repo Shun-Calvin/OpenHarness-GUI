@@ -36,7 +36,7 @@ function formatDuration(seconds: number): string {
 	return `${m}m${s}s`;
 }
 
-export function SwarmPanel({
+function SwarmPanelInner({
 	teammates,
 	notifications,
 	collapsed: initialCollapsed = false,
@@ -123,3 +123,5 @@ export function SwarmPanel({
 		</Box>
 	);
 }
+
+export const SwarmPanel = React.memo(SwarmPanelInner);

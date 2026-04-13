@@ -18,7 +18,7 @@ function parseTodoItems(markdown: string): TodoItem[] {
 	return items;
 }
 
-export function TodoPanel({
+function TodoPanelInner({
 	markdown,
 	compact: initialCompact = false,
 }: {
@@ -85,5 +85,7 @@ export function TodoPanel({
 		</Box>
 	);
 }
+
+export const TodoPanel = React.memo(TodoPanelInner);
 
 export {parseTodoItems};

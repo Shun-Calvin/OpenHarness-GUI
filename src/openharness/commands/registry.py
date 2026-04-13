@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib.metadata
 import json
+import re
 import shutil
 import subprocess
 from datetime import datetime, timezone
@@ -100,6 +101,8 @@ class SlashCommand:
     name: str
     description: str
     handler: CommandHandler
+    remote_invocable: bool = True
+    remote_admin_opt_in: bool = False
 
 
 class CommandRegistry:
@@ -375,9 +378,11 @@ def create_default_command_registry(
             return CommandResult(message="\n".join(path.name for path in memory_files))
         if action == "show" and rest:
             memory_dir = get_project_memory_dir(context.cwd)
-            path = memory_dir / rest
-            if not path.exists():
-                path = memory_dir / f"{rest}.md"
+            path, invalid = _resolve_memory_entry_path(memory_dir, rest)
+            if invalid:
+                return CommandResult(message="Memory entry path must stay within the project memory directory.")
+            if path is None:
+                return CommandResult(message=f"Memory entry not found: {rest}")
             if not path.exists():
                 return CommandResult(message=f"Memory entry not found: {rest}")
             return CommandResult(message=path.read_text(encoding="utf-8"))
@@ -558,6 +563,19 @@ def create_default_command_registry(
 
     async def _agents_handler(args: str, context: CommandContext) -> CommandResult:
         tokens = args.split(maxsplit=1)
+        guide = (
+            "Subagent guide:\n"
+            "- Ask the model to delegate with the `agent` tool when the task needs background work or parallel investigation.\n"
+            '- The usual worker shape is subagent_type="worker".\n'
+            "- /agents lists known worker tasks.\n"
+            "- /agents show TASK_ID shows one worker's output and metadata.\n"
+            "- send_message(task_id=..., message=...) can continue a spawned worker.\n"
+            "- task_output(task_id=...) reads the worker's latest output."
+        )
+        if tokens and tokens[0] in {"help", "usage"}:
+            return CommandResult(
+                message=guide
+            )
         if tokens and tokens[0] == "show" and len(tokens) == 2:
             task = get_task_manager().get_task(tokens[1])
             if task is None or task.type not in {"local_agent", "remote_agent", "in_process_teammate"}:
@@ -576,7 +594,9 @@ def create_default_command_registry(
             if task.type in {"local_agent", "remote_agent", "in_process_teammate"}
         ]
         if not tasks:
-            return CommandResult(message="No active or recorded agents.")
+            return CommandResult(
+                message=f"No active or recorded agents. Run /agents help for usage.\n\n{guide}"
+            )
         lines = [
             f"{task.id} {task.type} {task.status} {task.description}"
             for task in tasks
@@ -1545,8 +1565,24 @@ def create_default_command_registry(
     registry.register(SlashCommand("mcp", "Show MCP status", _mcp_handler))
     registry.register(SlashCommand("plugin", "Manage plugins", _plugin_handler))
     registry.register(SlashCommand("reload-plugins", "Reload plugin discovery for this workspace", _reload_plugins_handler))
-    registry.register(SlashCommand("permissions", "Show or update permission mode", _permissions_handler))
-    registry.register(SlashCommand("plan", "Toggle plan permission mode", _plan_handler))
+    registry.register(
+        SlashCommand(
+            "permissions",
+            "Show or update permission mode",
+            _permissions_handler,
+            remote_invocable=False,
+            remote_admin_opt_in=True,
+        )
+    )
+    registry.register(
+        SlashCommand(
+            "plan",
+            "Toggle plan permission mode",
+            _plan_handler,
+            remote_invocable=False,
+            remote_admin_opt_in=True,
+        )
+    )
     registry.register(SlashCommand("fast", "Show or update fast mode", _fast_handler))
     registry.register(SlashCommand("effort", "Show or update reasoning effort", _effort_handler))
     registry.register(SlashCommand("passes", "Show or update reasoning pass count", _passes_handler))
@@ -1570,6 +1606,7 @@ def create_default_command_registry(
     registry.register(SlashCommand("release-notes", "Show recent OpenHarness release notes", _release_notes_handler))
     registry.register(SlashCommand("upgrade", "Show upgrade instructions", _upgrade_handler))
     registry.register(SlashCommand("agents", "List or inspect agent and teammate tasks", _agents_handler))
+    registry.register(SlashCommand("subagents", "Show subagent usage and inspect worker tasks", _agents_handler))
     registry.register(SlashCommand("tasks", "Manage background tasks", _tasks_handler))
 
     for plugin_command in plugin_commands or ():
@@ -1602,3 +1639,39 @@ def create_default_command_registry(
             )
         )
     return registry
+
+
+def _resolve_memory_entry_path(memory_dir: Path, candidate: str) -> tuple[Path | None, bool]:
+    """Resolve a memory entry path while enforcing containment under ``memory_dir``."""
+
+    base = memory_dir.resolve()
+    resolved, invalid = _resolve_memory_candidate(base, candidate)
+    if invalid:
+        return None, True
+    if resolved is not None and resolved.exists():
+        return resolved, False
+    fallback, invalid = _resolve_memory_candidate(base, f"{candidate}.md")
+    if invalid:
+        return None, True
+    if fallback is not None and fallback.exists():
+        return fallback, False
+    slug = re.sub(r"[^a-zA-Z0-9]+", "_", candidate.strip().lower()).strip("_")
+    if slug and slug != candidate:
+        slugged, invalid = _resolve_memory_candidate(base, f"{slug}.md")
+        if invalid:
+            return None, True
+        if slugged is not None and slugged.exists():
+            return slugged, False
+    return None, False
+
+
+def _resolve_memory_candidate(memory_dir: Path, candidate: str) -> tuple[Path | None, bool]:
+    path = Path(candidate).expanduser()
+    if not path.is_absolute():
+        path = memory_dir / path
+    resolved = path.resolve()
+    try:
+        resolved.relative_to(memory_dir)
+    except ValueError:
+        return None, True
+    return resolved, False

@@ -1,3 +1,4 @@
+import React from 'react';
 import {Box, Text} from 'ink';
 
 import {useTheme} from '../theme/ThemeContext.js';
@@ -26,7 +27,7 @@ function groupToolPairs(items: TranscriptItem[]): GroupedItem[] {
 	return result;
 }
 
-export function ConversationView({
+function ConversationViewInner({
 	items,
 	assistantBuffer,
 	showWelcome,
@@ -65,6 +66,8 @@ export function ConversationView({
 		</Box>
 	);
 }
+
+export const ConversationView = React.memo(ConversationViewInner);
 
 function MessageRow({item, theme}: {item: TranscriptItem; theme: ReturnType<typeof useTheme>['theme']}): React.JSX.Element {
 	switch (item.role) {

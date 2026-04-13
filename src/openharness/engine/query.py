@@ -622,7 +622,7 @@ async def _execute_tool_call(
                 log.debug("permission denied by user for %s", tool_name)
                 return ToolResultBlock(
                     tool_use_id=tool_use_id,
-                    content=f"Permission denied for {tool_name}",
+                    content=decision.reason or f"Permission denied for {tool_name}",
                     is_error=True,
                 )
         else:

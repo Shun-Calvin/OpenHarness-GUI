@@ -194,6 +194,10 @@ class OhmoGatewayBridge:
         return True
 
     async def _process_message(self, message, session_key: str) -> None:
+        # Preserve inbound message_id so channels can reply in-thread
+        inbound_meta = {
+            k: message.metadata[k] for k in ("message_id", "thread_id") if k in message.metadata
+        }
         try:
             reply = ""
             async for update in self._runtime_pool.stream_message(message, session_key):
@@ -217,6 +221,13 @@ class OhmoGatewayBridge:
                     message.channel,
                     message.chat_id,
                     session_key,
+                await self._bus.publish_outbound(
+                    OutboundMessage(
+                        channel=message.channel,
+                        chat_id=message.chat_id,
+                        content=update.text,
+                        metadata={**inbound_meta, **(update.metadata or {})},
+                    )
                 )
                 continue
             logger.info(
@@ -233,6 +244,20 @@ class OhmoGatewayBridge:
                     content=reply,
                     metadata={"_session_key": session_key},
                 )
+            return
+        logger.info(
+            "ohmo outbound final channel=%s chat_id=%s session_key=%s content=%r",
+            message.channel,
+            message.chat_id,
+            session_key,
+            _content_snippet(reply),
+        )
+        await self._bus.publish_outbound(
+            OutboundMessage(
+                channel=message.channel,
+                chat_id=message.chat_id,
+                content=reply,
+                metadata={**inbound_meta, "_session_key": session_key},
             )
 
     def stop(self) -> None:
