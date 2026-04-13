@@ -685,6 +685,114 @@ def create_app(
             })
         return {'commands': result, 'total': len(result)}
     
+    @app.post("/api/import")
+    async def import_item(request: Request):
+        """Import plugins, tools, prompts, or commands from files or URLs."""
+        import json
+        import tempfile
+        import shutil
+        from pathlib import Path
+        from openharness.config.paths import get_config_dir
+        
+        content_type = request.headers.get('content-type', '')
+        
+        try:
+            if 'multipart/form-data' in content_type:
+                # Handle file upload
+                form = await request.form()
+                file = form.get('file')
+                import_type = form.get('type', 'plugin')
+                
+                if not file:
+                    return JSONResponse({'error': 'No file provided'}, status_code=400)
+                
+                # Read file content
+                file_content = await file.read()
+                file_name = file.filename or 'uploaded_file'
+                
+                # Determine target directory based on type
+                if import_type == 'plugin':
+                    target_dir = get_config_dir() / 'plugins' / 'imported'
+                elif import_type == 'tool':
+                    target_dir = get_config_dir() / 'tools' / 'imported'
+                elif import_type == 'prompt':
+                    target_dir = get_config_dir() / 'prompts' / 'imported'
+                elif import_type == 'command':
+                    target_dir = get_config_dir() / 'commands' / 'imported'
+                else:
+                    return JSONResponse({'error': f'Unknown import type: {import_type}'}, status_code=400)
+                
+                target_dir.mkdir(parents=True, exist_ok=True)
+                
+                # Save file
+                if file_name.endswith('.zip'):
+                    # Extract zip file
+                    with tempfile.NamedTemporaryFile(delete=False, suffix='.zip') as tmp:
+                        tmp.write(file_content)
+                        tmp_path = tmp.name
+                    
+                    import zipfile
+                    with zipfile.ZipFile(tmp_path, 'r') as zip_ref:
+                        zip_ref.extractall(target_dir)
+                    Path(tmp_path).unlink()
+                else:
+                    # Save as-is
+                    target_file = target_dir / file_name
+                    target_file.write_bytes(file_content)
+                
+                return {
+                    'success': True,
+                    'message': f'Imported {file_name} to {target_dir}',
+                    'type': import_type,
+                }
+            
+            elif 'application/json' in content_type:
+                # Handle URL import
+                data = await request.json()
+                url = data.get('url')
+                import_type = data.get('type', 'plugin')
+                
+                if not url:
+                    return JSONResponse({'error': 'No URL provided'}, status_code=400)
+                
+                import httpx
+                async with httpx.AsyncClient() as client:
+                    response = await client.get(url, timeout=30.0)
+                    response.raise_for_status()
+                    file_content = response.content
+                    file_name = url.split('/')[-1] or 'imported_file'
+                
+                # Determine target directory based on type
+                if import_type == 'plugin':
+                    target_dir = get_config_dir() / 'plugins' / 'imported'
+                elif import_type == 'tool':
+                    target_dir = get_config_dir() / 'tools' / 'imported'
+                elif import_type == 'prompt':
+                    target_dir = get_config_dir() / 'prompts' / 'imported'
+                elif import_type == 'command':
+                    target_dir = get_config_dir() / 'commands' / 'imported'
+                else:
+                    return JSONResponse({'error': f'Unknown import type: {import_type}'}, status_code=400)
+                
+                target_dir.mkdir(parents=True, exist_ok=True)
+                
+                # Save file
+                target_file = target_dir / file_name
+                target_file.write_bytes(file_content)
+                
+                return {
+                    'success': True,
+                    'message': f'Imported from {url} to {target_dir}',
+                    'type': import_type,
+                }
+            
+            else:
+                return JSONResponse({'error': 'Unsupported content type'}, status_code=400)
+        
+        except Exception as e:
+            logger.error(f"Import failed: {e}")
+            return JSONResponse({'error': str(e)}, status_code=500)
+    
     @app.get("/api/providers")
     async def get_providers():
         """Get list of available providers."""
@@ -940,10 +1048,17 @@ def create_app(
                 
                 # Update permission mode in app state
                 if 'permission_mode' in payload:
-                    backend_host.runtime_bundle.app_state.set(permission_mode=payload['permission_mode'])
+                    # Normalize permission mode value (handle legacy 'auto' value)
+                    permission_mode_value = payload['permission_mode']
+                    if permission_mode_value == 'auto':
+                        permission_mode_value = 'full_auto'
+                    backend_host.runtime_bundle.app_state.set(permission_mode=permission_mode_value)
                     # Update permission checker
                     from openharness.permissions.checker import PermissionChecker
+                    from openharness.permissions.modes import PermissionMode
                     current_settings = backend_host.runtime_bundle.current_settings()
+                    # Update the settings object with the normalized mode
+                    current_settings.permission.mode = PermissionMode(permission_mode_value)
                     new_checker = PermissionChecker(current_settings.permission)
                     backend_host.runtime_bundle.engine.set_permission_checker(new_checker)
             

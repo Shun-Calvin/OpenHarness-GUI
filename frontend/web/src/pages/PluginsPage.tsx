@@ -1,5 +1,6 @@
-import { useState, useEffect } from 'react';
-import { Plug, RefreshCw, Box, Wrench, Users, Zap, Globe, ChevronDown, ChevronUp, Settings, Power, Check } from 'lucide-react';
+import { useState, useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
+import { Plug, RefreshCw, Box, Wrench, Users, Zap, Globe, ChevronDown, ChevronUp, Settings, Power, Check, Download, Upload, FolderOpen, Link, X, AlertCircle } from 'lucide-react';
 import styles from '../styles/PageLayout.module.css';
 
 interface PluginSkill {
@@ -43,6 +44,13 @@ export function PluginsPage() {
   const [error, setError] = useState<string | null>(null);
   const [expandedPlugin, setExpandedPlugin] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
+  const [showImportModal, setShowImportModal] = useState(false);
+  const [importUrl, setImportUrl] = useState('');
+  const [importLoading, setImportLoading] = useState(false);
+  const [importError, setImportError] = useState<string | null>(null);
+  
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const folderInputRef = useRef<HTMLInputElement>(null);
   
   const fetchPlugins = async () => {
     setLoading(true);
@@ -65,6 +73,76 @@ export function PluginsPage() {
   useEffect(() => {
     fetchPlugins();
   }, []);
+  
+  const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const files = event.target.files;
+    if (!files || files.length === 0) return;
+    
+    setImportLoading(true);
+    setImportError(null);
+    
+    try {
+      for (const file of Array.from(files)) {
+        const formData = new FormData();
+        formData.append('file', file);
+        formData.append('type', 'plugin');
+        
+        const response = await fetch('/api/import', {
+          method: 'POST',
+          body: formData,
+        });
+        
+        if (!response.ok) {
+          const errorData = await response.json();
+          throw new Error(errorData.error || `Failed to import ${file.name}`);
+        }
+      }
+      
+      setShowImportModal(false);
+      fetchPlugins();
+    } catch (err) {
+      setImportError(err instanceof Error ? err.message : 'Failed to import file');
+    } finally {
+      setImportLoading(false);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+      if (folderInputRef.current) folderInputRef.current.value = '';
+    }
+  };
+  
+  const handleUrlImport = async () => {
+    if (!importUrl) return;
+    
+    setImportLoading(true);
+    setImportError(null);
+    
+    try {
+      let fetchUrl = importUrl;
+      if (importUrl.includes('github.com') && !importUrl.includes('raw')) {
+        fetchUrl = importUrl
+          .replace('github.com', 'raw.githubusercontent.com')
+          .replace('/blob/', '/');
+      }
+      
+      const response = await fetch('/api/import', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url: fetchUrl, type: 'plugin' }),
+      });
+      
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Failed to import from URL');
+      }
+      
+      setShowImportModal(false);
+      setImportUrl('');
+      fetchPlugins();
+    } catch (err) {
+      setImportError(err instanceof Error ? err.message : 'Failed to import from URL');
+    } finally {
+      setImportLoading(false);
+    }
+  };
   
   const toggleExpand = (name: string) => {
     setExpandedPlugin(expandedPlugin === name ? null : name);
@@ -119,6 +197,14 @@ export function PluginsPage() {
           </div>
           
           <div style={{ flex: 1 }} />
+          
+          <button 
+            className={styles.secondaryButton}
+            onClick={() => setShowImportModal(true)}
+          >
+            <Download size={18} />
+            Import
+          </button>
           
           <button 
             className={styles.primaryButton}
@@ -290,6 +376,129 @@ export function PluginsPage() {
           </div>
         )}
       </div>
+      
+      {/* Import Modal */}
+      {showImportModal && createPortal(
+        <div className={styles.modalOverlay}>
+          <div className={styles.modal} data-import-modal>
+            <div className={styles.modalHeader}>
+              <h2><Download size={20} /> Import Plugins</h2>
+              <button 
+                className={styles.modalClose}
+                onClick={() => {
+                  setShowImportModal(false);
+                  setImportError(null);
+                  setImportUrl('');
+                }}
+              >
+                <X size={20} />
+              </button>
+            </div>
+            
+            <div className={styles.modalContent}>
+              <div className={styles.importOptions}>
+                <div className={styles.importOption}>
+                  <div className={styles.importOptionHeader}>
+                    <Upload size={20} />
+                    <h3>Upload Files</h3>
+                  </div>
+                  <p className={styles.importOptionDesc}>
+                    Upload plugin files (.json, .zip, or plugin directories)
+                  </p>
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    multiple
+                    accept=".json,.zip"
+                    onChange={handleFileUpload}
+                    style={{ display: 'none' }}
+                  />
+                  <button 
+                    className={styles.primaryButton}
+                    onClick={() => fileInputRef.current?.click()}
+                    disabled={importLoading}
+                  >
+                    <Upload size={16} />
+                    Select Files
+                  </button>
+                </div>
+                
+                <div className={styles.importOption}>
+                  <div className={styles.importOptionHeader}>
+                    <FolderOpen size={20} />
+                    <h3>Upload Folder</h3>
+                  </div>
+                  <p className={styles.importOptionDesc}>
+                    Import multiple plugins from a folder
+                  </p>
+                  <input
+                    ref={folderInputRef}
+                    type="file"
+                    multiple
+                    // @ts-expect-error webkitdirectory is not in the type definitions
+                    webkitdirectory="true"
+                    onChange={handleFileUpload}
+                    style={{ display: 'none' }}
+                  />
+                  <button 
+                    className={styles.primaryButton}
+                    onClick={() => folderInputRef.current?.click()}
+                    disabled={importLoading}
+                  >
+                    <FolderOpen size={16} />
+                    Select Folder
+                  </button>
+                </div>
+                
+                <div className={styles.importOption}>
+                  <div className={styles.importOptionHeader}>
+                    <Link size={20} />
+                    <h3>Import from URL</h3>
+                  </div>
+                  <p className={styles.importOptionDesc}>
+                    Import from GitHub or any URL
+                  </p>
+                  <div className={styles.urlInputSection}>
+                    <input
+                      type="url"
+                      value={importUrl}
+                      onChange={(e) => setImportUrl(e.target.value)}
+                      placeholder="https://github.com/user/plugin/plugin.json"
+                      className={styles.urlInput}
+                    />
+                    <button 
+                      className={styles.primaryButton}
+                      onClick={handleUrlImport}
+                      disabled={!importUrl || importLoading}
+                    >
+                      {importLoading ? <RefreshCw size={16} className={styles.spinning} /> : <Download size={16} />}
+                      Import
+                    </button>
+                  </div>
+                  <div className={styles.urlExamples}>
+                    <p><Globe size={14} /> GitHub: github.com/user/repo/plugin.json</p>
+                  </div>
+                </div>
+              </div>
+              
+              {importError && (
+                <div className={styles.errorAlert}>
+                  <AlertCircle size={18} />
+                  <span>{importError}</span>
+                </div>
+              )}
+              
+              {importLoading && (
+                <div className={styles.loadingIndicator}>
+                  <RefreshCw size={24} className={styles.spinning} />
+                  <span>Importing...</span>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
     </div>
   );
 }

@@ -1,5 +1,6 @@
-import { useState, useEffect } from 'react';
-import { FileText, RefreshCw, Brain, Folder, Cpu, Zap, Info, CheckCircle, XCircle, Copy, Check, Settings, Sliders } from 'lucide-react';
+import { useState, useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
+import { FileText, RefreshCw, Brain, Folder, FolderOpen, Cpu, Zap, Info, CheckCircle, XCircle, Copy, Check, Settings, Sliders, Download, Upload, Link, X, AlertCircle, Globe } from 'lucide-react';
 import styles from '../styles/PageLayout.module.css';
 
 interface ClaudeMdFile {
@@ -37,6 +38,13 @@ export function PromptsPage() {
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<'files' | 'environment' | 'settings'>('files');
   const [copiedPrompt, setCopiedPrompt] = useState(false);
+  const [showImportModal, setShowImportModal] = useState(false);
+  const [importUrl, setImportUrl] = useState('');
+  const [importLoading, setImportLoading] = useState(false);
+  const [importError, setImportError] = useState<string | null>(null);
+  
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const folderInputRef = useRef<HTMLInputElement>(null);
   
   const fetchPrompts = async () => {
     setLoading(true);
@@ -65,6 +73,76 @@ export function PromptsPage() {
       return () => clearTimeout(timer);
     }
   }, [copiedPrompt]);
+  
+  const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const files = event.target.files;
+    if (!files || files.length === 0) return;
+    
+    setImportLoading(true);
+    setImportError(null);
+    
+    try {
+      for (const file of Array.from(files)) {
+        const formData = new FormData();
+        formData.append('file', file);
+        formData.append('type', 'prompt');
+        
+        const response = await fetch('/api/import', {
+          method: 'POST',
+          body: formData,
+        });
+        
+        if (!response.ok) {
+          const errorData = await response.json();
+          throw new Error(errorData.error || `Failed to import ${file.name}`);
+        }
+      }
+      
+      setShowImportModal(false);
+      fetchPrompts();
+    } catch (err) {
+      setImportError(err instanceof Error ? err.message : 'Failed to import file');
+    } finally {
+      setImportLoading(false);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+      if (folderInputRef.current) folderInputRef.current.value = '';
+    }
+  };
+  
+  const handleUrlImport = async () => {
+    if (!importUrl) return;
+    
+    setImportLoading(true);
+    setImportError(null);
+    
+    try {
+      let fetchUrl = importUrl;
+      if (importUrl.includes('github.com') && !importUrl.includes('raw')) {
+        fetchUrl = importUrl
+          .replace('github.com', 'raw.githubusercontent.com')
+          .replace('/blob/', '/');
+      }
+      
+      const response = await fetch('/api/import', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url: fetchUrl, type: 'prompt' }),
+      });
+      
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Failed to import from URL');
+      }
+      
+      setShowImportModal(false);
+      setImportUrl('');
+      fetchPrompts();
+    } catch (err) {
+      setImportError(err instanceof Error ? err.message : 'Failed to import from URL');
+    } finally {
+      setImportLoading(false);
+    }
+  };
   
   const handleCopyPrompt = async () => {
     if (data?.system_prompt) {
@@ -142,6 +220,14 @@ export function PromptsPage() {
           </div>
           
           <div style={{ flex: 1 }} />
+          
+          <button 
+            className={styles.secondaryButton}
+            onClick={() => setShowImportModal(true)}
+          >
+            <Download size={18} />
+            Import
+          </button>
           
           <button 
             className={styles.primaryButton}
@@ -374,6 +460,129 @@ export function PromptsPage() {
           </>
         )}
       </div>
+      
+      {/* Import Modal */}
+      {showImportModal && createPortal(
+        <div className={styles.modalOverlay}>
+          <div className={styles.modal} data-import-modal>
+            <div className={styles.modalHeader}>
+              <h2><Download size={20} /> Import Prompts</h2>
+              <button 
+                className={styles.modalClose}
+                onClick={() => {
+                  setShowImportModal(false);
+                  setImportError(null);
+                  setImportUrl('');
+                }}
+              >
+                <X size={20} />
+              </button>
+            </div>
+            
+            <div className={styles.modalContent}>
+              <div className={styles.importOptions}>
+                <div className={styles.importOption}>
+                  <div className={styles.importOptionHeader}>
+                    <Upload size={20} />
+                    <h3>Upload Files</h3>
+                  </div>
+                  <p className={styles.importOptionDesc}>
+                    Upload prompt files (.md, .txt, CLAUDE.md)
+                  </p>
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    multiple
+                    accept=".md,.txt"
+                    onChange={handleFileUpload}
+                    style={{ display: 'none' }}
+                  />
+                  <button 
+                    className={styles.primaryButton}
+                    onClick={() => fileInputRef.current?.click()}
+                    disabled={importLoading}
+                  >
+                    <Upload size={16} />
+                    Select Files
+                  </button>
+                </div>
+                
+                <div className={styles.importOption}>
+                  <div className={styles.importOptionHeader}>
+                    <FolderOpen size={20} />
+                    <h3>Upload Folder</h3>
+                  </div>
+                  <p className={styles.importOptionDesc}>
+                    Import multiple prompt files from a folder
+                  </p>
+                  <input
+                    ref={folderInputRef}
+                    type="file"
+                    multiple
+                    // @ts-expect-error webkitdirectory is not in the type definitions
+                    webkitdirectory="true"
+                    onChange={handleFileUpload}
+                    style={{ display: 'none' }}
+                  />
+                  <button 
+                    className={styles.primaryButton}
+                    onClick={() => folderInputRef.current?.click()}
+                    disabled={importLoading}
+                  >
+                    <FolderOpen size={16} />
+                    Select Folder
+                  </button>
+                </div>
+                
+                <div className={styles.importOption}>
+                  <div className={styles.importOptionHeader}>
+                    <Link size={20} />
+                    <h3>Import from URL</h3>
+                  </div>
+                  <p className={styles.importOptionDesc}>
+                    Import from GitHub or any URL
+                  </p>
+                  <div className={styles.urlInputSection}>
+                    <input
+                      type="url"
+                      value={importUrl}
+                      onChange={(e) => setImportUrl(e.target.value)}
+                      placeholder="https://github.com/user/repo/CLAUDE.md"
+                      className={styles.urlInput}
+                    />
+                    <button 
+                      className={styles.primaryButton}
+                      onClick={handleUrlImport}
+                      disabled={!importUrl || importLoading}
+                    >
+                      {importLoading ? <RefreshCw size={16} className={styles.spinning} /> : <Download size={16} />}
+                      Import
+                    </button>
+                  </div>
+                  <div className={styles.urlExamples}>
+                    <p><Globe size={14} /> GitHub: github.com/user/repo/CLAUDE.md</p>
+                  </div>
+                </div>
+              </div>
+              
+              {importError && (
+                <div className={styles.errorAlert}>
+                  <AlertCircle size={18} />
+                  <span>{importError}</span>
+                </div>
+              )}
+              
+              {importLoading && (
+                <div className={styles.loadingIndicator}>
+                  <RefreshCw size={24} className={styles.spinning} />
+                  <span>Importing...</span>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
     </div>
   );
 }

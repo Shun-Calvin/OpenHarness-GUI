@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { AlertTriangle, CheckCircle, XCircle, Shield, Loader2, RefreshCw, Info, MessageSquare } from 'lucide-react';
 import { useAppStore } from '../store/useAppStore';
 import { useBackendConnection } from '../hooks/useBackendConnection';
@@ -18,6 +18,23 @@ export function PermissionModal() {
   
   // Check if we're in auto mode - modal shouldn't appear but handle gracefully
   const isAutoMode = settings?.permissionMode === 'full_auto';
+  
+  // Auto-approve immediately in auto mode to prevent showing the modal
+  useEffect(() => {
+    if (isAutoMode && activeModal.kind === 'permission') {
+      console.log('[PermissionModal] Auto mode detected, auto-approving:', activeModal.request_id);
+      const modal = activeModal as PermissionModalRequest;
+      // Send approval to backend
+      sendPermissionResponse(modal.request_id, true);
+      // Clear the modal
+      respondToModal(modal.request_id, true);
+    }
+  }, [isAutoMode, activeModal, sendPermissionResponse, respondToModal]);
+  
+  // Don't render the modal in auto mode (it will be auto-approved above)
+  if (isAutoMode && activeModal.kind === 'permission') {
+    return null;
+  }
   
   // Handle permission request
   if (activeModal.kind === 'permission') {

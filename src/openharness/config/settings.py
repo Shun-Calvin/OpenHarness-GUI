@@ -54,6 +54,15 @@ class PermissionSettings(BaseModel):
     path_rules: list[PathRuleConfig] = Field(default_factory=list)
     denied_commands: list[str] = Field(default_factory=list)
 
+    @classmethod
+    def model_validate(cls, value):
+        """Override validation to normalize legacy 'auto' mode to 'full_auto'."""
+        if isinstance(value, dict):
+            mode_value = value.get('mode')
+            if mode_value == 'auto':
+                value = {**value, 'mode': 'full_auto'}
+        return super().model_validate(value)
+
 
 class MemorySettings(BaseModel):
     """Memory system configuration."""
