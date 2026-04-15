@@ -72,7 +72,7 @@ export function createSocket(connectionUrl: string): Socket {
     reconnectionDelay: 1000,
     reconnectionDelayMax: 5000,
     reconnectionAttempts: MAX_RECONNECT_ATTEMPTS,
-    timeout: 20000,
+    timeout: 60000,
     path: '/socket.io',
     autoConnect: true,
     forceNew: false,

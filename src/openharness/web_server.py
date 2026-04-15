@@ -1043,6 +1043,8 @@ def create_app(
                 if 'model' in payload and payload['model']:
                     try:
                         backend_host.runtime_bundle.engine.set_model(payload['model'])
+                        # Also update app_state so it's reflected in future state snapshots
+                        backend_host.runtime_bundle.app_state.set(model=payload['model'])
                     except Exception as e:
                         logger.warning(f"Failed to update engine model: {e}")
                 
@@ -1061,6 +1063,26 @@ def create_app(
                     current_settings.permission.mode = PermissionMode(permission_mode_value)
                     new_checker = PermissionChecker(current_settings.permission)
                     backend_host.runtime_bundle.engine.set_permission_checker(new_checker)
+                
+                # Update other app_state fields
+                app_state_updates = {}
+                if 'theme' in payload:
+                    app_state_updates['theme'] = payload['theme']
+                if 'effort' in payload:
+                    app_state_updates['effort'] = payload['effort']
+                if 'passes' in payload:
+                    app_state_updates['passes'] = int(payload['passes'])
+                if 'output_style' in payload:
+                    app_state_updates['output_style'] = payload['output_style']
+                if 'vim_mode' in payload:
+                    app_state_updates['vim_enabled'] = bool(payload['vim_mode'])
+                if 'voice_mode' in payload:
+                    app_state_updates['voice_enabled'] = bool(payload['voice_mode'])
+                if 'fast_mode' in payload:
+                    app_state_updates['fast_mode'] = bool(payload['fast_mode'])
+                
+                if app_state_updates:
+                    backend_host.runtime_bundle.app_state.set(**app_state_updates)
             
             # Broadcast updated state to all clients
             await backend_host.broadcast({

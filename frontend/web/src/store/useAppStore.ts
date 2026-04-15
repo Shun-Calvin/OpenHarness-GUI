@@ -102,6 +102,9 @@ interface AppState {
   searchQuery: string;
   searchResults: { chatId: string; chatName: string; messageId: string; content: string; timestamp: number }[];
   
+  // Scroll to message after search navigation
+  scrollToMessageId: string | null;
+  
   // Callback actions (set by hooks)
   submitPrompt: ((prompt: string, files?: UploadedFile[]) => void) | null;
   sendPermissionResponse: ((requestId: string, allowed: boolean) => void) | null;
@@ -175,6 +178,7 @@ interface AppState {
   setSearchQuery: (query: string) => void;
   searchMessages: (query: string) => void;
   clearSearch: () => void;
+  setScrollToMessageId: (messageId: string | null) => void;
   
   addSkill: (skill: Skill) => void;
   updateSkill: (skillId: string, updates: Partial<Skill>) => void;
@@ -337,6 +341,7 @@ export const useAppStore = create<AppState>((set) => ({
   isResizingTimeline: false,
   searchQuery: '',
   searchResults: [],
+  scrollToMessageId: null,
   
   // New features initial state - load from localStorage
   chatSessions: loadFromStorage<ChatSession[]>(STORAGE_KEYS.CHAT_SESSIONS, []),
@@ -683,6 +688,7 @@ export const useAppStore = create<AppState>((set) => ({
     return { searchQuery: query, searchResults: results };
   }),
   clearSearch: () => set({ searchQuery: '', searchResults: [] }),
+  setScrollToMessageId: (messageId) => set({ scrollToMessageId: messageId }),
   
   addSkill: (skill) => set((state) => {
     const newSkills = [...state.skills, { ...skill, createdAt: Date.now(), updatedAt: Date.now() }];

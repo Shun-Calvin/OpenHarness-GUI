@@ -14,6 +14,21 @@ import type {
 	TranscriptItem,
 } from '../types.js';
 
+// Deterministic JSON stringify with sorted keys for stable snapshots
+function stableStringify(value: unknown): string {
+	if (value === null || value === undefined) {
+		return JSON.stringify(value);
+	}
+	if (typeof value !== 'object') {
+		return JSON.stringify(value);
+	}
+	if (Array.isArray(value)) {
+		return '[' + value.map(stableStringify).join(',') + ']';
+	}
+	const keys = Object.keys(value as Record<string, unknown>).sort();
+	return '{' + keys.map((k) => JSON.stringify(k) + ':' + stableStringify((value as Record<string, unknown>)[k])).join(',') + '}';
+}
+
 const PROTOCOL_PREFIX = 'OHJSON:';
 const ASSISTANT_DELTA_FLUSH_MS = 50;
 const ASSISTANT_DELTA_FLUSH_CHARS = 384;
@@ -38,6 +53,10 @@ export function useBackendSession(config: FrontendConfig, onExit: (code?: number
 	const statusRef = useRef<Record<string, unknown>>({});
 	const childRef = useRef<ChildProcessWithoutNullStreams | null>(null);
 	const sentInitialPrompt = useRef(false);
+	const lastStatusSnapshotRef = useRef<string>('');
+	const lastTasksSnapshotRef = useRef<string>('');
+	const lastMcpSnapshotRef = useRef<string>('');
+	const lastBridgeSnapshotRef = useRef<string>('');
 
 	// Streaming deltas can arrive one token at a time; updating Ink state for each
 	// delta causes heavy re-rendering/flicker. Buffer and flush at ~30fps.

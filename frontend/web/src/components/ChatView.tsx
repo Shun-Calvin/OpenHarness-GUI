@@ -29,7 +29,9 @@ export function ChatView() {
     timelineWidth,
     setTimelineWidth,
     isResizingTimeline,
-    setIsResizingTimeline
+    setIsResizingTimeline,
+    scrollToMessageId,
+    setScrollToMessageId
   } = useAppStore();
   
   const [input, setInput] = useState('');
@@ -58,6 +60,46 @@ export function ChatView() {
     // Use instant scroll to avoid animation conflicts
     endElement.scrollIntoView({ behavior: instant ? 'auto' : 'smooth', block: 'end' });
   };
+
+  // Scroll to a specific message when navigating from search results
+  useEffect(() => {
+    if (!scrollToMessageId) return;
+    
+    // Use requestAnimationFrame to ensure DOM is ready after chat switch
+    const timer = setTimeout(() => {
+      const messageElement = messageRefs.current.get(scrollToMessageId);
+      const container = messagesContentRef.current;
+      
+      if (messageElement && container) {
+        // Calculate position relative to the scrollable container
+        const elementOffset = messageElement.offsetTop - container.offsetTop;
+        // Scroll to show the element centered in the viewport
+        const scrollTarget = elementOffset - (container.clientHeight / 2) + (messageElement.offsetHeight / 2);
+        
+        // Set flag to prevent auto-scroll interference
+        isJumpingRef.current = true;
+        setUserHasManuallyScrolled(true);
+        
+        container.scrollTo({ top: Math.max(0, scrollTarget), behavior: 'smooth' });
+        
+        // Highlight the message briefly
+        messageElement.classList.add(styles.highlighted);
+        setTimeout(() => {
+          messageElement.classList.remove(styles.highlighted);
+        }, 2000);
+        
+        // Reset flag after scroll completes
+        setTimeout(() => {
+          isJumpingRef.current = false;
+        }, 500);
+      }
+      
+      // Clear the scroll target
+      setScrollToMessageId(null);
+    }, 100);
+    
+    return () => clearTimeout(timer);
+  }, [scrollToMessageId, setScrollToMessageId]);
 
   // Only auto-scroll to bottom when new messages are added AND user was already at bottom
   useEffect(() => {

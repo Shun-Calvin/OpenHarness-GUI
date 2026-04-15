@@ -66,17 +66,16 @@ export function useBackendConnection() {
           if (event.state) {
             const state = event.state as Record<string, unknown>;
             setSessionState(state as any);
-            if (state.model) setCurrentModel(state.model as string);
-            
-            const newSettings: Record<string, any> = {};
-            if (state.permission_mode) {
-              const mode = state.permission_mode as string;
-              newSettings.permissionMode = mode === 'auto' ? 'full_auto' : mode;
+            // Update sessionState model, but don't overwrite localStorage settings
+            // The settings.model should come from localStorage or user interaction
+            if (state.model) {
+              // Only update sessionState, not localStorage settings
+              setSessionState({ model: state.model as string });
             }
-            if (state.working_directory) newSettings.workingDirectory = state.working_directory;
-            if (state.max_turns) newSettings.maxTurns = state.max_turns;
             
-            if (Object.keys(newSettings).length > 0) updateSettings(newSettings);
+            // Don't update settings from backend state - preserve localStorage preferences
+            // Settings should only be updated when user explicitly changes them in UI
+            // or when saving to backend via API
             
             if (state.skills && Array.isArray(state.skills)) {
               setSkills(state.skills.map((s: any) => ({
@@ -237,22 +236,13 @@ export function useBackendConnection() {
           if (event.state) {
             const state = event.state as Record<string, unknown>;
             setSessionState(state as any);
+            // Update sessionState model, but don't overwrite localStorage settings
             if (state.model && typeof state.model === 'string') {
-              setCurrentModel(state.model);
+              setSessionState({ model: state.model });
             }
           }
-          
-          const snapshotSettings: Record<string, any> = {};
-          const modeSource = event.permission_mode || (event.state && (event.state as any).permission_mode);
-          if (modeSource) {
-            snapshotSettings.permissionMode = modeSource === 'auto' ? 'full_auto' : modeSource;
-          }
-          if (event.state) {
-            const state = event.state as any;
-            if (state.working_directory) snapshotSettings.workingDirectory = state.working_directory;
-            if (state.max_turns) snapshotSettings.maxTurns = state.max_turns;
-          }
-          if (Object.keys(snapshotSettings).length > 0) updateSettings(snapshotSettings);
+          // Don't update settings from backend state - preserve localStorage preferences
+          // Settings should only be updated when user explicitly changes them in UI
           break;
 
         case 'tasks_snapshot':

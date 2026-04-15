@@ -16,6 +16,7 @@ export function ChatSessions() {
     setSearchQuery,
     searchMessages,
     clearSearch,
+    setScrollToMessageId,
     chatSidebarWidth,
     setChatSidebarWidth,
     isResizingChatSidebar,
@@ -152,8 +153,9 @@ export function ChatSessions() {
     searchMessages(query);
   };
 
-  const handleSearchResultClick = (chatId: string) => {
+  const handleSearchResultClick = (chatId: string, messageId: string) => {
     switchChat(chatId);
+    setScrollToMessageId(messageId);
     clearSearch();
     setShowSearch(false);
   };
@@ -225,7 +227,7 @@ export function ChatSessions() {
                 <div 
                   key={`${result.chatId}-${result.messageId}`}
                   className={styles.searchResultItem}
-                  onClick={() => handleSearchResultClick(result.chatId)}
+                  onClick={() => handleSearchResultClick(result.chatId, result.messageId)}
                 >
                   <div className={styles.searchResultChat}>{result.chatName}</div>
                   <div className={styles.searchResultContent}>{result.content}</div>

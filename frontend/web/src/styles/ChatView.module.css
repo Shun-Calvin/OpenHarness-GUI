@@ -538,6 +538,26 @@
   }
 }
 
+/* Highlighted message from search navigation */
+.message.highlighted {
+  animation: highlightPulse 2s ease-out;
+}
+
+@keyframes highlightPulse {
+  0% {
+    background: rgba(59, 130, 246, 0.3);
+    box-shadow: inset 0 0 0 2px rgba(59, 130, 246, 0.5);
+  }
+  50% {
+    background: rgba(59, 130, 246, 0.15);
+    box-shadow: inset 0 0 0 1px rgba(59, 130, 246, 0.3);
+  }
+  100% {
+    background: transparent;
+    box-shadow: none;
+  }
+}
+
 /* User messages - right-aligned wrapper */
 .message.user {
   background: transparent;
