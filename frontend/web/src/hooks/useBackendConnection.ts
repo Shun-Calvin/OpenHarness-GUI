@@ -17,6 +17,10 @@ let globalIsProcessingServerEvent = false;
 let globalLastManualSave = 0;
 let globalListenersSetup = false;
 
+// Time window to consider a config_saved event as our own save
+// This prevents updating localStorage from saves initiated by other clients
+const SAVE_TIME_WINDOW_MS = 5000;
+
 export function useBackendConnection() {
   const streamingMessageRef = useRef<Message | null>(null);
   const userMessageTimestampRef = useRef<number | null>(null);
@@ -260,20 +264,33 @@ export function useBackendConnection() {
         case 'config_saved':
           if (event.settings) {
             const savedSettings = event.settings as Record<string, unknown>;
-            if (savedSettings.model) setCurrentModel(savedSettings.model as string);
             
-            const batchedSettings: Record<string, any> = {};
-            if (savedSettings.permission_mode) {
-              batchedSettings.permissionMode = savedSettings.permission_mode === 'auto' ? 'full_auto' : savedSettings.permission_mode;
+            // Only update localStorage if this save was initiated by this frontend
+            // Check if we recently triggered a manual save (within the time window)
+            const now = Date.now();
+            const isOurSave = (now - globalLastManualSave) < SAVE_TIME_WINDOW_MS;
+            
+            if (isOurSave) {
+              // This was our save - update localStorage to confirm
+              if (savedSettings.model) setCurrentModel(savedSettings.model as string);
+              
+              const batchedSettings: Record<string, any> = {};
+              if (savedSettings.permission_mode) {
+                batchedSettings.permissionMode = savedSettings.permission_mode === 'auto' ? 'full_auto' : savedSettings.permission_mode;
+              }
+              if (savedSettings.theme) batchedSettings.theme = savedSettings.theme;
+              if (savedSettings.effort) batchedSettings.effort = savedSettings.effort;
+              if (savedSettings.passes) batchedSettings.passes = savedSettings.passes;
+              if (savedSettings.max_turns) batchedSettings.maxTurns = savedSettings.max_turns;
+              if (savedSettings.vim_mode !== undefined) batchedSettings.vimMode = savedSettings.vim_mode;
+              if (savedSettings.voice_mode !== undefined) batchedSettings.fastMode = savedSettings.voice_mode;
+              
+              if (Object.keys(batchedSettings).length > 0) updateSettings(batchedSettings);
+            } else {
+              // This save was initiated by another client or the backend itself
+              // Don't update localStorage - preserve user's preferences
+              console.log('[useBackendConnection] Received config_saved from external source, preserving localStorage settings');
             }
-            if (savedSettings.theme) batchedSettings.theme = savedSettings.theme;
-            if (savedSettings.effort) batchedSettings.effort = savedSettings.effort;
-            if (savedSettings.passes) batchedSettings.passes = savedSettings.passes;
-            if (savedSettings.max_turns) batchedSettings.maxTurns = savedSettings.max_turns;
-            if (savedSettings.vim_mode !== undefined) batchedSettings.vimMode = savedSettings.vim_mode;
-            if (savedSettings.voice_mode !== undefined) batchedSettings.fastMode = savedSettings.voice_mode;
-            
-            if (Object.keys(batchedSettings).length > 0) updateSettings(batchedSettings);
           }
           break;
       }
@@ -504,22 +521,11 @@ export function useBackendConnection() {
       if (response.ok) {
         const config = await response.json();
         
-        // Wrap fetching initial config in the lock too so it doesn't trigger saves
-        globalIsProcessingServerEvent = true;
-        if (config.model) updateSettings({ model: config.model });
+        // DO NOT update localStorage settings from backend config
+        // The user's localStorage preferences should be preserved and synced to backend
+        // instead of being overwritten by backend state.
+        // Only return the config for informational purposes.
         
-        const newSettings: Record<string, any> = {};
-        if (config.permission_mode) newSettings.permissionMode = config.permission_mode === 'auto' ? 'full_auto' : config.permission_mode;
-        if (config.theme) newSettings.theme = config.theme;
-        if (config.effort) newSettings.effort = config.effort;
-        if (config.passes) newSettings.passes = config.passes;
-        if (config.max_turns) newSettings.maxTurns = config.max_turns;
-        if (config.vim_mode !== undefined) newSettings.vimMode = config.vim_mode;
-        if (config.voice_mode !== undefined) newSettings.fastMode = config.voice_mode;
-        
-        if (Object.keys(newSettings).length > 0) updateSettings(newSettings);
-        
-        setTimeout(() => { globalIsProcessingServerEvent = false; }, 150);
         return config;
       }
       
@@ -603,11 +609,35 @@ export function useBackendConnection() {
       setSendPermissionResponse(sendPermissionResponse);
       setClearConversationCallback(clearConversation);
       setSaveSettingsCallback(saveSettingsToBackend);
+      
+      // Sync frontend localStorage settings to backend on connection
+      // This ensures user's preferences are applied to the backend
+      const settings = useAppStore.getState().settings;
+      const sessionState = useAppStore.getState().sessionState;
+      
+      // Only sync if frontend has different values than backend
+      const configToSend: Record<string, unknown> = {};
+      
+      // Sync model if frontend has a preference different from backend
+      if (settings.model && settings.model !== sessionState?.model) {
+        configToSend['model'] = settings.model;
+      }
+      
+      // Sync permission mode if frontend has a preference different from backend
+      if (settings.permissionMode && settings.permissionMode !== sessionState?.permission_mode) {
+        configToSend['permission_mode'] = settings.permissionMode;
+      }
+      
+      // Send config to backend if there are differences
+      if (Object.keys(configToSend).length > 0) {
+        console.log('[useBackendConnection] Syncing frontend settings to backend:', configToSend);
+        sendConfig(configToSend);
+      }
     }
   }, [
     connected, submitPrompt, sendPermissionResponse, clearConversation, 
     saveSettingsToBackend, setSubmitPrompt, setSendPermissionResponse, 
-    setClearConversationCallback, setSaveSettingsCallback
+    setClearConversationCallback, setSaveSettingsCallback, sendConfig
   ]);
 
   const disconnect = useCallback(() => {

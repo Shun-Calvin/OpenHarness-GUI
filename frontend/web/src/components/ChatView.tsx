@@ -31,7 +31,9 @@ export function ChatView() {
     isResizingTimeline,
     setIsResizingTimeline,
     scrollToMessageId,
-    setScrollToMessageId
+    setScrollToMessageId,
+    addMemory,
+    addMessage
   } = useAppStore();
   
   const [input, setInput] = useState('');
@@ -627,6 +629,53 @@ export function ChatView() {
     // Don't submit if resizing, busy, or no input
     if (isResizingInput || !input.trim() || isBusy || !submitPrompt) return;
     
+    // Check for memory creation commands
+    const trimmedInput = input.trim();
+    const memoryCommands = ['/remember', '/add-memory', '/mem', 'remember:', 'add memory:', 'remember me:', 'note:'];
+    const isMemoryCommand = memoryCommands.some(cmd => trimmedInput.toLowerCase().startsWith(cmd));
+    
+    if (isMemoryCommand) {
+      // Extract memory content (remove the command prefix)
+      let memoryContent = trimmedInput;
+      for (const cmd of memoryCommands) {
+        if (memoryContent.toLowerCase().startsWith(cmd)) {
+          memoryContent = memoryContent.substring(cmd.length).trim();
+          break;
+        }
+      }
+      
+      // Detect memory type from content or default to 'fact'
+      let memoryType: 'fact' | 'preference' | 'context' = 'fact';
+      const lowerContent = memoryContent.toLowerCase();
+      if (lowerContent.includes('prefer') || lowerContent.includes('like') || lowerContent.includes('dislike')) {
+        memoryType = 'preference';
+      } else if (lowerContent.includes('context') || lowerContent.includes('project') || lowerContent.includes('work')) {
+        memoryType = 'context';
+      }
+      
+      // Add memory to store
+      const newMemory = {
+        id: `mem-${Date.now()}`,
+        content: memoryContent,
+        createdAt: Date.now(),
+        type: memoryType
+      };
+      addMemory(newMemory);
+      
+      // Show feedback message
+      const typeLabels = { fact: 'Fact', preference: 'Preference', context: 'Context' };
+      addMessage({
+        id: `sys-${Date.now()}`,
+        role: 'system',
+        content: `✅ Memory saved (${typeLabels[memoryType]}): "${memoryContent}"\n\n💡 Tip: View and manage your memories in the Memory page`,
+        timestamp: Date.now()
+      });
+      
+      // Clear input
+      setInput('');
+      return;
+    }
+    
     // Submit with files (uploaded + pasted)
     submitPrompt(input.trim(), [...uploadedFiles, ...pastedImages.map(file => ({
       id: `pasted-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
@@ -1201,6 +1250,7 @@ export function ChatView() {
             <span>Type <kbd>/</kbd> for commands</span>
             <span><kbd>Enter</kbd> to send</span>
             <span><kbd>Shift+Enter</kbd> new line</span>
+            <span>💡 <kbd>/remember</kbd> to save memories</span>
           </div>
         </form>
       </div>

@@ -141,6 +141,12 @@ export function MemoryPage() {
             <Brain size={48} />
             <h3>No memories stored</h3>
             <p>Add facts, preferences, or context to help the AI remember</p>
+            <div className={styles.emptyStateHint}>
+              <p><strong>Tip:</strong> You can also create memories directly in chat:</p>
+              <code>/remember I prefer TypeScript over JavaScript</code><br/>
+              <code>remember: My project uses React and Tailwind</code><br/>
+              <code>Note: The API endpoint is https://api.example.com</code>
+            </div>
           </div>
         ) : (
           <div className={styles.memoryList}>

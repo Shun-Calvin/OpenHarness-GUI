@@ -1113,6 +1113,144 @@ def create_app(
             return {"status": "accepted"}
         return {"status": "error", "message": "Runtime not ready"}
     
+    # Memory API endpoints
+    @app.get("/api/memories")
+    async def get_memories():
+        """Get all memories for the current project."""
+        from openharness.memory import scan_memory_files, get_project_memory_dir
+        
+        try:
+            work_dir = cwd or str(Path.cwd())
+            headers = scan_memory_files(work_dir)
+            
+            memories = []
+            for header in headers:
+                # Read full content from file
+                try:
+                    content = header.path.read_text(encoding="utf-8")
+                    # Remove frontmatter for display
+                    lines = content.splitlines()
+                    if lines and lines[0].strip() == "---":
+                        # Find end of frontmatter
+                        for i, line in enumerate(lines[1:], 1):
+                            if line.strip() == "---":
+                                content = "\n".join(lines[i+1:]).strip()
+                                break
+                
+                except OSError:
+                    content = header.description
+                
+                memories.append({
+                    "id": header.path.stem,
+                    "title": header.title,
+                    "content": content,
+                    "createdAt": int(header.modified_at * 1000),
+                    "type": header.memory_type or "fact",
+                    "description": header.description,
+                })
+            
+            return {"memories": memories}
+        except Exception as e:
+            logger.exception("Error getting memories")
+            return {"memories": [], "error": str(e)}
+    
+    @app.post("/api/memories")
+    async def add_memory(payload: dict):
+        """Add a new memory entry."""
+        from openharness.memory import add_memory_entry
+        
+        try:
+            title = payload.get("title") or payload.get("content", "")[:50]
+            content = payload.get("content", "")
+            memory_type = payload.get("type", "fact")
+            
+            if not content:
+                return {"status": "error", "message": "Content required"}
+            
+            # Create content with frontmatter
+            full_content = f"""---
+name: {title}
+type: {memory_type}
+---
+
+{content}
+"""
+            
+            work_dir = cwd or str(Path.cwd())
+            path = add_memory_entry(work_dir, title, full_content)
+            
+            return {
+                "status": "success",
+                "memory": {
+                    "id": path.stem,
+                    "title": title,
+                    "content": content,
+                    "createdAt": int(path.stat().st_mtime * 1000),
+                    "type": memory_type,
+                }
+            }
+        except Exception as e:
+            logger.exception("Error adding memory")
+            return {"status": "error", "message": str(e)}
+    
+    @app.delete("/api/memories/{memory_id}")
+    async def remove_memory(memory_id: str):
+        """Remove a memory entry."""
+        from openharness.memory import remove_memory_entry
+        
+        try:
+            work_dir = cwd or str(Path.cwd())
+            if remove_memory_entry(work_dir, memory_id):
+                return {"status": "success"}
+            return {"status": "error", "message": "Memory not found"}
+        except Exception as e:
+            logger.exception("Error removing memory")
+            return {"status": "error", "message": str(e)}
+    
+    @app.put("/api/memories/{memory_id}")
+    async def update_memory(memory_id: str, payload: dict):
+        """Update a memory entry."""
+        from openharness.memory import get_project_memory_dir
+        
+        try:
+            work_dir = cwd or str(Path.cwd())
+            memory_dir = get_project_memory_dir(work_dir)
+            
+            # Find the memory file
+            matches = [p for p in memory_dir.glob("*.md") if p.stem == memory_id]
+            if not matches:
+                return {"status": "error", "message": "Memory not found"}
+            
+            path = matches[0]
+            content = payload.get("content", "")
+            memory_type = payload.get("type", "fact")
+            title = payload.get("title") or memory_id
+            
+            # Update content with frontmatter
+            full_content = f"""---
+name: {title}
+type: {memory_type}
+---
+
+{content}
+"""
+            
+            path.write_text(full_content.strip() + "\n", encoding="utf-8")
+            
+            return {
+                "status": "success",
+                "memory": {
+                    "id": memory_id,
+                    "title": title,
+                    "content": content,
+                    "createdAt": int(path.stat().st_mtime * 1000),
+                    "type": memory_type,
+                }
+            }
+        except Exception as e:
+            logger.exception("Error updating memory")
+            return {"status": "error", "message": str(e)}
+    
     # Initialize build state lock
     _frontend_build_state['lock'] = asyncio.Lock()
     _frontend_build_state['frontend_dir'] = frontend_dir

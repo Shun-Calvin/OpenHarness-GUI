@@ -275,6 +275,33 @@ const SLASH_COMMANDS: SlashCommand[] = [
     example: '/memory list'
   },
   {
+    id: 'remember',
+    command: '/remember',
+    label: 'Remember',
+    description: 'Save a fact, preference, or context to memory',
+    category: 'Context',
+    icon: <Brain size={16} />,
+    example: '/remember I prefer TypeScript over JavaScript'
+  },
+  {
+    id: 'add-memory',
+    command: '/add-memory',
+    label: 'Add Memory',
+    description: 'Add information to long-term memory',
+    category: 'Context',
+    icon: <Brain size={16} />,
+    example: '/add-memory This project uses React and Tailwind CSS'
+  },
+  {
+    id: 'mem',
+    command: '/mem',
+    label: 'Mem (shortcut)',
+    description: 'Quick shortcut to save a memory',
+    category: 'Context',
+    icon: <Brain size={16} />,
+    example: '/mem Working directory is ~/projects/my-app'
+  },
+  {
     id: 'files',
     command: '/files',
     label: 'Files',
